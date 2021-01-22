@@ -1,2 +1,1 @@
-# Nemty
-## The one who travels
+# Nemty - The one who travels
