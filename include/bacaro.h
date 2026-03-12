@@ -30,12 +30,14 @@ int bacaro_set (bacaro_t *self, const char *path,
 
 /* Reading — immediate cache lookup. *out points into internal storage;
    valid until the next bacaro_set or bacaro_dispatch on the same path.
+   Do NOT call free() on *out — it is not caller-allocated.
    Returns BACARO_ENOTFOUND if the property is not cached. */
 int bacaro_get (bacaro_t *self, const char *path,
                const uint8_t **out, size_t *out_len);
 
 /* Returns the name of the last process to publish a cached property,
-   or NULL if not found. Pointer valid until next set/dispatch on that path. */
+   or NULL if not found. Pointer valid until next set/dispatch on that path.
+   Do NOT call free() on the returned pointer. */
 const char *bacaro_get_publisher(bacaro_t *self, const char *path);
 
 /* Batch read — returns all cached properties whose path starts with

@@ -111,8 +111,8 @@ typedef void (*bacaro_fn)(bacaro_t *self, const char *path,
 
 ### Notes on memory ownership
 
-- `bacaro_get` — `*out` points into internal cache storage. Valid until the next `bacaro_set` or `bacaro_dispatch` on the same path. Do not free it.
-- `bacaro_get_publisher` — same rules as above.
+- `bacaro_get` — `*out` points into internal cache storage. Valid until the next `bacaro_set` or `bacaro_dispatch` on the same path. **Do not free it** — the pointer is not heap-allocated by the caller and calling `free()` on it is undefined behaviour.
+- `bacaro_get_publisher` — same rules as above. Do not free.
 - `bacaro_get_domain` — returns a heap-allocated list. Caller must call `bacaro_proplist_destroy()`.
 - `bacaro_proplist_*` accessors — pointers are valid for the lifetime of the `bacaro_proplist_t`.
 
