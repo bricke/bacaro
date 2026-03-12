@@ -1,6 +1,6 @@
 # Bacaro — Where your processes share a round
 
-[![CI](https://github.com/bricke/nemty/actions/workflows/ci.yml/badge.svg)](https://github.com/bricke/nemty/actions/workflows/ci.yml)
+[![CI](https://github.com/bricke/bacaro/actions/workflows/ci.yml/badge.svg)](https://github.com/bricke/bacaro/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A reliable, brokerless message bus for single-machine use. Processes publish properties to the bus and subscribe to the domains they care about. Each process maintains a local cache of everything it has received — no central broker, no single point of failure.
