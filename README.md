@@ -189,12 +189,31 @@ This means `bacaro_get` always returns the latest known value immediately, witho
 
 ## Debug / monitoring
 
-Subscribe to everything with `bacaro_subscribe_all` (equivalent to `bacaro_subscribe(n, "")`). Because all processes are already fully connected to all others, a debug process sees all traffic with no special configuration:
+### oste
 
-```c
-bacaro_t *debug = bacaro_new("debugger");
-bacaro_subscribe_all(debug);
-bacaro_on_update(debug, on_update, NULL);
+`oste` is a built-in monitoring tool that prints every property update passing through the bus, one per line with a timestamp:
+
+```
+[14:32:01.042] sensors.cpu.temperature          = 71.3  (from: powerd)
+[14:32:01.043] network.eth0.rx_bytes            = 1048576  (from: netd)
+```
+
+Run it directly or via its alias:
+
+```sh
+oste
+# or
+bacaro-monitor
+```
+
+`oste` subscribes to all properties and does not publish anything. It exits cleanly on `Ctrl+C`.
+
+To skip building the tools:
+
+```sh
+cmake -B build -DBACARO_BUILD_TOOLS=OFF
+# or via environment variable:
+BACARO_BUILD_TOOLS=OFF cmake -B build
 ```
 
 ---
@@ -263,6 +282,7 @@ ctest --test-dir build --output-on-failure
 |---|---|---|
 | `BACARO_RUNTIME_DIR` | `/tmp/bacaro` | Directory where Bacaro creates IPC socket files |
 | `BACARO_BUILD_TESTS` | `ON` | Set to `OFF` to skip test compilation |
+| `BACARO_BUILD_TOOLS` | `ON` | Set to `OFF` to skip tool compilation (`oste`) |
 
 ---
 

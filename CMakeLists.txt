@@ -47,6 +47,16 @@ target_link_libraries(bacaro
 
 target_compile_options(bacaro PRIVATE ${ZMQ_CFLAGS_OTHER})
 
+# Tools — disabled by setting BACARO_BUILD_TOOLS=OFF (CMake option or env variable)
+option(BACARO_BUILD_TOOLS "Build Bacaro tools (oste / bacaro-monitor)" ON)
+if(DEFINED ENV{BACARO_BUILD_TOOLS})
+    set(BACARO_BUILD_TOOLS $ENV{BACARO_BUILD_TOOLS} CACHE BOOL "" FORCE)
+endif()
+
+if(BACARO_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
+
 # Tests — disabled by setting BACARO_BUILD_TESTS=OFF (CMake option or env variable)
 option(BACARO_BUILD_TESTS "Build Bacaro tests" ON)
 if(DEFINED ENV{BACARO_BUILD_TESTS})
