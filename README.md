@@ -208,6 +208,25 @@ bacaro-monitor
 
 `oste` subscribes to all properties and does not publish anything. It exits cleanly on `Ctrl+C`.
 
+### vecio
+
+`vecio` sets a single property from the command line and exits. Useful for injecting values while monitoring with `oste`.
+
+```sh
+vecio <path> <value>
+# or
+bacaro-set <path> <value>
+```
+
+Value type is inferred automatically — `true`/`false` become bool, integers become int64, decimals become float64, everything else becomes a string:
+
+```sh
+vecio sensors.cpu.temperature 71.3
+vecio system.status running
+vecio system.reboot_count 5
+vecio system.maintenance true
+```
+
 To skip building the tools:
 
 ```sh
