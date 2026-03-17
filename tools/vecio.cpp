@@ -1,6 +1,7 @@
 #include <bacaro.h>
 #include <msgpack.hpp>
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -32,16 +33,24 @@ static std::vector<uint8_t> pack_value(const char *str)
     msgpack::sbuffer buf;
     char *end;
 
-    if (strcmp(str, "true") == 0)
+    if (strcmp(str, "true") == 0) {
         msgpack::pack(buf, true);
-    else if (strcmp(str, "false") == 0)
+    } else if (strcmp(str, "false") == 0) {
         msgpack::pack(buf, false);
-    else if (long long iv = strtoll(str, &end, 10); *end == '\0')
-        msgpack::pack(buf, iv);
-    else if (double dv = strtod(str, &end); *end == '\0')
-        msgpack::pack(buf, dv);
-    else
-        msgpack::pack(buf, std::string(str));
+    } else {
+        errno = 0;
+        long long iv = strtoll(str, &end, 10);
+        if (*end == '\0' && errno == 0) {
+            msgpack::pack(buf, iv);
+        } else {
+            errno = 0;
+            double dv = strtod(str, &end);
+            if (*end == '\0' && errno == 0)
+                msgpack::pack(buf, dv);
+            else
+                msgpack::pack(buf, std::string(str));
+        }
+    }
 
     return std::vector<uint8_t>(buf.data(), buf.data() + buf.size());
 }

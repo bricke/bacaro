@@ -132,6 +132,17 @@ void bacaro_destroy(bacaro_t **self_ptr)
         fs::remove(ipc_path(self, suffix), ec);
     };
 
+    // ZMQ PUB/SUB has a "slow-joiner" problem: on process startup, connections
+    // between sockets take a moment to establish and subscriptions to propagate.
+    // If a message is published and the process exits before ZMQ has flushed it
+    // to connected subscribers, the message is silently dropped. Setting
+    // ZMQ_LINGER to 200ms on the PUB socket gives ZMQ enough time to deliver
+    // recently published messages to already-connected peers before teardown.
+    // 200ms is chosen as a balance between reliability and acceptable exit latency.
+    if (self->pub_sock) {
+        int linger_ms = 200;
+        zmq_setsockopt(self->pub_sock, ZMQ_LINGER, &linger_ms, sizeof(linger_ms));
+    }
     close_and_remove(self->pub_sock,    ".pub");
     close_and_remove(self->router_sock, ".rep");
 

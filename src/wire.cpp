@@ -119,7 +119,12 @@ int snapshot_handle_request(void *router_sock, const Cache &cache)
 
     std::string prefix(frames[2].begin(), frames[2].end());
 
-    // Send one reply per matching cache entry
+    auto send_frame = [&](const void *data, size_t len, int flags) -> int {
+        return zmq_send(router_sock, data, len, flags) < 0 ? BACARO_EZMQ : BACARO_OK;
+    };
+
+    // Send one reply per matching cache entry; break on any send failure so we
+    // don't corrupt a half-written multipart message on the wire.
     auto entries = cache.get_prefix(prefix);
     for (const auto &[path, entry] : entries) {
         // [identity][REP_flag][topic][header][payload]
@@ -130,23 +135,20 @@ int snapshot_handle_request(void *router_sock, const Cache &cache)
             entry.timestamp
         };
 
-        auto send_frame = [&](const void *data, size_t len, int flags) {
-            return zmq_send(router_sock, data, len, flags);
-        };
-
-        send_frame(identity.data(), identity.size(), ZMQ_SNDMORE);
-
         uint8_t rep_flag = BACARO_FLAG_SNAPSHOT_REP;
-        send_frame(&rep_flag, 1, ZMQ_SNDMORE);
-        send_frame(path.data(), path.size(), ZMQ_SNDMORE);
-        send_frame(&hdr, sizeof(hdr), ZMQ_SNDMORE);
-        send_frame(entry.payload.data(), entry.payload.size(), 0);
+        if (send_frame(identity.data(), identity.size(), ZMQ_SNDMORE) != BACARO_OK
+         || send_frame(&rep_flag, 1, ZMQ_SNDMORE) != BACARO_OK
+         || send_frame(path.data(), path.size(), ZMQ_SNDMORE) != BACARO_OK
+         || send_frame(&hdr, sizeof(hdr), ZMQ_SNDMORE) != BACARO_OK
+         || send_frame(entry.payload.data(), entry.payload.size(), 0) != BACARO_OK)
+            break;
     }
 
-    // Send END marker: [identity][END_flag]
-    zmq_send(router_sock, identity.data(), identity.size(), ZMQ_SNDMORE);
+    // Always send END marker — even after a send failure — so the peer is
+    // never left blocking indefinitely waiting for a reply that will not come.
+    send_frame(identity.data(), identity.size(), ZMQ_SNDMORE);
     uint8_t end_flag = BACARO_FLAG_SNAPSHOT_END;
-    zmq_send(router_sock, &end_flag, 1, 0);
+    send_frame(&end_flag, 1, 0);
 
     return BACARO_OK;
 }
