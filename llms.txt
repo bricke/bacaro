@@ -1,0 +1,104 @@
+# Bacaro
+
+> A reliable, brokerless pub/sub message bus for single-machine use, built on ZeroMQ.
+> Tagline: "Where your processes share a round"
+
+Bacaro lets processes on the same machine publish named properties and subscribe to the ones they care about. There is no central broker — every process holds a local cache and is fully connected to every other. Named after the traditional Venetian wine bar.
+
+## Key concepts
+
+- **Properties**: named values identified by dot-separated paths (`sensors.cpu.temperature`). Values are MessagePack-encoded and can be scalars, arrays, or maps.
+- **Domains**: any prefix of a property path. Subscribing to `sensors` receives all paths starting with `sensors.`.
+- **Last-write-wins**: any process can publish on any path; the last value persists even after the publisher exits.
+- **Late-join / snapshot**: on connecting to a new peer, a snapshot of all matching cached properties is requested automatically — no polling needed.
+- **Publisher identity**: inferred from which IPC socket the message arrived on; zero wire overhead.
+
+## Build
+
+```sh
+sudo apt-get install -y pkg-config libzmq3-dev
+cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+Optional build flags (CMake option or env variable):
+- `BACARO_BUILD_TESTS=OFF` — skip test compilation
+- `BACARO_BUILD_TOOLS=OFF` — skip oste/vecio tool compilation
+
+## Source layout
+
+- `include/bacaro.h` — public C API (the only file consumers need)
+- `src/bacaro.cpp` — lifecycle, subscriptions, publish, dispatch, batch read
+- `src/wire.h` / `src/wire.cpp` — wire format encode/decode and snapshot protocol
+- `src/cache.h` / `src/cache.cpp` — local property cache
+- `src/discovery.h` / `src/discovery.cpp` — inotify-based peer discovery and epoll management
+- `src/internal.h` — internal structs (`bacaro_s`, `PeerInfo`, `bacaro_proplist_s`)
+- `tools/oste.cpp` — monitoring tool: prints all property updates (alias: `bacaro-monitor`)
+- `tools/vecio.cpp` — CLI setter: publishes a single property and exits (alias: `bacaro-set`)
+- `tests/` — doctest test suite (7 suites covering wire, cache, lifecycle, discovery, snapshot, pubsub, batch read)
+
+## Public API summary
+
+```c
+// Lifecycle
+bacaro_t *bacaro_new(const char *name);
+void      bacaro_destroy(bacaro_t **self);
+
+// Subscriptions
+int bacaro_subscribe(bacaro_t *self, const char *domain);
+int bacaro_subscribe_all(bacaro_t *self);
+int bacaro_unsubscribe(bacaro_t *self, const char *domain);
+
+// Publish
+int bacaro_set(bacaro_t *self, const char *path,
+               const uint8_t *msgpack_value, size_t len);
+
+// Read (immediate cache lookup — do NOT free returned pointers)
+int        bacaro_get(bacaro_t *self, const char *path,
+                      const uint8_t **out, size_t *out_len);
+const char *bacaro_get_publisher(bacaro_t *self, const char *path);
+
+// Batch read
+bacaro_proplist_t *bacaro_get_domain(bacaro_t *self, const char *domain_prefix);
+void              bacaro_proplist_destroy(bacaro_proplist_t **list);
+
+// Event loop integration
+int  bacaro_fd(bacaro_t *self);       // epoll fd — add to your own event loop
+int  bacaro_dispatch(bacaro_t *self); // call when fd is readable, or periodically
+void bacaro_on_update(bacaro_t *self, bacaro_fn callback, void *userdata);
+
+// Error codes: BACARO_OK=0, BACARO_ENOTFOUND=-1, BACARO_EINVAL=-2, BACARO_EZMQ=-3
+```
+
+## Wire format
+
+Three-frame ZMQ multipart:
+```
+Frame 0 — topic:   "domain.sub.property"
+Frame 1 — header:  version(1) | flags(1) | sequence(8) | timestamp(8)
+Frame 2 — payload: MessagePack bytes
+```
+
+Snapshot request/reply uses the same framing over DEALER/ROUTER with flag bytes indicating request, reply entries, and end-of-snapshot.
+
+## Runtime
+
+- IPC files created in `$BACARO_RUNTIME_DIR` (default: `/tmp/bacaro`)
+- Each process creates `<name>.<uuid>.pub` and `<name>.<uuid>.rep`
+- inotify watches the runtime directory for peer arrivals and departures
+
+## Dependencies
+
+| Dependency | Version   | How                             |
+|------------|-----------|---------------------------------|
+| libzmq     | 4.x       | System package (`libzmq3-dev`)  |
+| msgpack-c  | cpp-6.1.1 | CMake FetchContent, header-only |
+| doctest    | v2.4.11   | CMake FetchContent, tests only  |
+
+## Constraints
+
+- Single machine only (IPC transport, not TCP)
+- No authentication — all processes are trusted
+- No persistence — properties live in process memory only
+- C++17 internals; public API is C-compatible (`extern "C"`)
