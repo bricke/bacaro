@@ -33,10 +33,24 @@ static std::string resolve_runtime_dir()
     return env ? std::string(env) : "/tmp/bacaro";
 }
 
+static std::string ipc_path(bacaro_t *self, const char *suffix)
+{
+    return self->runtime_dir + "/" + self->name + "." + self->uuid + suffix;
+}
+
 static int bind_ipc(void *sock, const std::string &path)
 {
     std::string endpoint = "ipc://" + path;
     return zmq_bind(sock, endpoint.c_str()) == 0 ? BACARO_OK : BACARO_EZMQ;
+}
+
+static void apply_message(bacaro_t *self, const WireMessage &msg, const std::string &peer_name)
+{
+    self->cache.set(msg.topic, msg.payload, peer_name, msg.header.sequence, msg.header.timestamp);
+    if (self->on_update_cb)
+        self->on_update_cb(self, msg.topic.c_str(),
+                           msg.payload.data(), msg.payload.size(),
+                           self->on_update_data);
 }
 
 // Drain all pending ZMQ messages from a socket, calling handler for each
@@ -66,6 +80,7 @@ bacaro_t *bacaro_new(const char *name)
     self->name        = name;
     self->uuid        = generate_uuid();
     self->runtime_dir = resolve_runtime_dir();
+    self->own_pub     = self->name + "." + self->uuid + ".pub";
 
     std::error_code ec;
     fs::create_directories(self->runtime_dir, ec);
@@ -80,16 +95,14 @@ bacaro_t *bacaro_new(const char *name)
     if (!self->pub_sock)
         goto fail;
 
-    if (bind_ipc(self->pub_sock,
-                 self->runtime_dir + "/" + self->name + "." + self->uuid + ".pub") != BACARO_OK)
+    if (bind_ipc(self->pub_sock, ipc_path(self, ".pub")) != BACARO_OK)
         goto fail;
 
     self->router_sock = zmq_socket(self->zmq_ctx, ZMQ_ROUTER);
     if (!self->router_sock)
         goto fail;
 
-    if (bind_ipc(self->router_sock,
-                 self->runtime_dir + "/" + self->name + "." + self->uuid + ".rep") != BACARO_OK)
+    if (bind_ipc(self->router_sock, ipc_path(self, ".rep")) != BACARO_OK)
         goto fail;
 
     if (discovery_init(self) != BACARO_OK)
@@ -111,13 +124,12 @@ void bacaro_destroy(bacaro_t **self_ptr)
 
     discovery_cleanup(self);
 
-    auto close_and_remove = [&](void *&sock, const std::string &suffix) {
+    auto close_and_remove = [&](void *&sock, const char *suffix) {
         if (!sock) return;
-        std::string path = self->runtime_dir + "/" + self->name + "." + self->uuid + suffix;
         zmq_close(sock);
         sock = nullptr;
         std::error_code ec;
-        fs::remove(path, ec);
+        fs::remove(ipc_path(self, suffix), ec);
     };
 
     close_and_remove(self->pub_sock,    ".pub");
@@ -272,14 +284,7 @@ int bacaro_dispatch(bacaro_t *self)
                         bool is_end = false;
                         if (snapshot_recv_one(sock, msg, is_end) != BACARO_OK || is_end)
                             return;
-                        self->cache.set(msg.topic, msg.payload,
-                                        peer_name,
-                                        msg.header.sequence,
-                                        msg.header.timestamp);
-                        if (self->on_update_cb)
-                            self->on_update_cb(self, msg.topic.c_str(),
-                                               msg.payload.data(), msg.payload.size(),
-                                               self->on_update_data);
+                        apply_message(self, msg, peer_name);
                     });
                 }
                 continue;
@@ -301,15 +306,7 @@ int bacaro_dispatch(bacaro_t *self)
                         WireMessage msg;
                         if (wire_unpack(frames, msg) != BACARO_OK)
                             return;
-                        msg.publisher = peer_name;
-                        self->cache.set(msg.topic, msg.payload,
-                                        peer_name,
-                                        msg.header.sequence,
-                                        msg.header.timestamp);
-                        if (self->on_update_cb)
-                            self->on_update_cb(self, msg.topic.c_str(),
-                                               msg.payload.data(), msg.payload.size(),
-                                               self->on_update_data);
+                        apply_message(self, msg, peer_name);
                     });
                 }
             }

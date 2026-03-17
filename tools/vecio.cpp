@@ -30,41 +30,19 @@ static void usage(const char *prog)
 static std::vector<uint8_t> pack_value(const char *str)
 {
     msgpack::sbuffer buf;
+    char *end;
 
-    // bool
-    if (strcmp(str, "true") == 0) {
+    if (strcmp(str, "true") == 0)
         msgpack::pack(buf, true);
-        goto done;
-    }
-    if (strcmp(str, "false") == 0) {
+    else if (strcmp(str, "false") == 0)
         msgpack::pack(buf, false);
-        goto done;
-    }
+    else if (long long iv = strtoll(str, &end, 10); *end == '\0')
+        msgpack::pack(buf, iv);
+    else if (double dv = strtod(str, &end); *end == '\0')
+        msgpack::pack(buf, dv);
+    else
+        msgpack::pack(buf, std::string(str));
 
-    // int64
-    {
-        char *end;
-        long long iv = strtoll(str, &end, 10);
-        if (*end == '\0') {
-            msgpack::pack(buf, iv);
-            goto done;
-        }
-    }
-
-    // float64
-    {
-        char *end;
-        double dv = strtod(str, &end);
-        if (*end == '\0') {
-            msgpack::pack(buf, dv);
-            goto done;
-        }
-    }
-
-    // string fallback
-    msgpack::pack(buf, std::string(str));
-
-done:
     return std::vector<uint8_t>(buf.data(), buf.data() + buf.size());
 }
 

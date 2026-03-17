@@ -135,7 +135,6 @@ void discovery_peer_disconnect(bacaro_t *self, const std::string &filename)
 void discovery_process_inotify(bacaro_t *self)
 {
     alignas(struct inotify_event) char buf[4096];
-    const std::string our_pub = self->name + "." + self->uuid + ".pub";
 
     while (true) {
         ssize_t len = read(self->inotify_fd, buf, sizeof(buf));
@@ -147,7 +146,7 @@ void discovery_process_inotify(bacaro_t *self)
 
             if (ev->len > 0) {
                 std::string filename(ev->name);
-                if (ends_with(filename, ".pub") && filename != our_pub) {
+                if (ends_with(filename, ".pub") && filename != self->own_pub) {
                     if (ev->mask & IN_CREATE)
                         discovery_peer_connect(self, filename);
                     else if (ev->mask & IN_DELETE)
@@ -186,11 +185,10 @@ int discovery_init(bacaro_t *self)
     self->router_fd = get_zmq_fd(self->router_sock);
 
     // Scan for existing peers (inotify already watching — no race)
-    const std::string our_pub = self->name + "." + self->uuid + ".pub";
     std::error_code ec;
     for (const auto &entry : fs::directory_iterator(self->runtime_dir, ec)) {
         std::string filename = entry.path().filename().string();
-        if (ends_with(filename, ".pub") && filename != our_pub)
+        if (ends_with(filename, ".pub") && filename != self->own_pub)
             discovery_peer_connect(self, filename);
     }
 

@@ -27,6 +27,7 @@ struct bacaro_s {
     std::string name;
     std::string runtime_dir;
     std::string uuid;
+    std::string own_pub;  // "<name>.<uuid>.pub" — our own filename to ignore in discovery
 
     void *zmq_ctx     = nullptr;
     void *pub_sock    = nullptr;  // ZMQ_PUB
