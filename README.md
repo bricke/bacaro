@@ -1,5 +1,3 @@
-# Bacaro — Where your processes share a round
-
 ![Bacaro](media/bacaro-banner.png)
 
 [![CI](https://github.com/bricke/bacaro/actions/workflows/ci.yml/badge.svg)](https://github.com/bricke/bacaro/actions/workflows/ci.yml)
