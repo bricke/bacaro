@@ -111,10 +111,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (wait_ms > 0)
-        printf("set %s = %s  (waited %dms)\n", path, value, wait_ms);
-    else
-        printf("set %s = %s\n", path, value);
+    printf("set %s = %s  (waited %dms)\n", path, value, wait_ms);
 
     bacaro_destroy(&b);
     return 0;
