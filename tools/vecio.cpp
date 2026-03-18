@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <poll.h>
 #include <string>
 
@@ -97,10 +98,20 @@ int main(int argc, char **argv)
     }
 
     if (wait_ms > 0) {
+        struct timespec deadline, now;
+        clock_gettime(CLOCK_MONOTONIC, &deadline);
+        deadline.tv_nsec += (long)wait_ms * 1000000L;
+        deadline.tv_sec  += deadline.tv_nsec / 1000000000L;
+        deadline.tv_nsec %= 1000000000L;
+
         int fd = bacaro_fd(b);
-        struct pollfd pfd = { fd, POLLIN, 0 };
-        poll(&pfd, 1, wait_ms);
-        bacaro_dispatch(b);
+        do {
+            struct pollfd pfd = { fd, POLLIN, 0 };
+            poll(&pfd, 1, 10);
+            bacaro_dispatch(b);
+            clock_gettime(CLOCK_MONOTONIC, &now);
+        } while (now.tv_sec < deadline.tv_sec ||
+                 (now.tv_sec == deadline.tv_sec && now.tv_nsec < deadline.tv_nsec));
     }
 
     auto payload = pack_value(value);
