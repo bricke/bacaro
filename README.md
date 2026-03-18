@@ -36,4 +36,4 @@ ctest --test-dir build --output-on-failure
 
 ## License
 
-[MIT](LICENSE) — Copyright 2021 Matteo Brichese
+[MIT](LICENSE) — Copyright 2026 Matteo Brichese
