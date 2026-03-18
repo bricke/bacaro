@@ -25,6 +25,7 @@ ctest --test-dir build --output-on-failure
 | [Getting Started](docs/getting-started.md) | Dependencies, build options, tests, environment variables |
 | [Tools](docs/tools.md) | `oste` (monitor) and `vecio` (property setter) |
 | [Architecture](docs/architecture.md) | Internal design: discovery, dispatch, snapshot protocol, cache |
+| [Edge Cases](docs/edge-cases.md) | Known gotchas, limitations, and how to work around them |
 
 ## Dependencies
 
