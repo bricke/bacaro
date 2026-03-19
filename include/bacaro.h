@@ -3,6 +3,11 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#define BACARO_VERSION_MAJOR 0
+#define BACARO_VERSION_MINOR 1
+#define BACARO_VERSION_PATCH 0
+#define BACARO_VERSION_STRING "0.1.0"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
