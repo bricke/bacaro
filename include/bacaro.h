@@ -3,6 +3,17 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#define BACARO_VERSION_MAJOR 0
+#define BACARO_VERSION_MINOR 1
+#define BACARO_VERSION_PATCH 0
+#define BACARO_VERSION_STRING "0.1.0"
+
+/* Thread safety: bacaro_t is NOT thread-safe. All calls on a given instance
+   must happen from a single thread (typically the event-loop thread). ZMQ
+   sockets are not safe for concurrent use, and bacaro_get returns interior
+   pointers that are invalidated by the next set/dispatch call. If you need
+   multi-threaded access, protect the instance with an external mutex. */
+
 #ifdef __cplusplus
 extern "C" {
 #endif

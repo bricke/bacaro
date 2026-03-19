@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: bacaro
+Description: Brokerless message bus for single-machine IPC
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lbacaro
+Cflags: -I${includedir}
+Requires: libzmq

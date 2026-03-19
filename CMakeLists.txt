@@ -45,7 +45,29 @@ target_link_libraries(bacaro
         msgpack-cxx
 )
 
-target_compile_options(bacaro PRIVATE ${ZMQ_CFLAGS_OTHER})
+target_compile_options(bacaro PRIVATE ${ZMQ_CFLAGS_OTHER} -Wall -Wextra -Wpedantic)
+
+# Install
+include(GNUInstallDirs)
+
+install(TARGETS bacaro
+    EXPORT bacaroTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(FILES include/bacaro.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(EXPORT bacaroTargets
+    FILE bacaroConfig.cmake
+    NAMESPACE bacaro::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/bacaro
+)
+
+configure_file(bacaro.pc.in ${CMAKE_CURRENT_BINARY_DIR}/bacaro.pc @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bacaro.pc
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+)
 
 # Tools — disabled by setting BACARO_BUILD_TOOLS=OFF (CMake option or env variable)
 option(BACARO_BUILD_TOOLS "Build Bacaro tools (oste / bacaro-monitor)" ON)

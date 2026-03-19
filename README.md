@@ -35,6 +35,14 @@ ctest --test-dir build --output-on-failure
 | [msgpack-c](https://github.com/msgpack/msgpack-c) | cpp-6.1.1 | CMake `FetchContent` |
 | [doctest](https://github.com/doctest/doctest) | v2.4.11 | CMake `FetchContent`, tests only |
 
+## Design constraints
+
+- **Single machine only** — IPC transport (`ipc://`), not TCP
+- **Single-threaded** — all calls on a `bacaro_t` instance must happen from one thread (the event-loop thread). ZMQ sockets are not safe for concurrent use, and `bacaro_get` returns interior pointers invalidated by the next `set`/`dispatch`. If you need multi-threaded access, protect the instance with an external mutex.
+- **Linux only** — uses epoll and inotify for event dispatch and peer discovery
+- **No authentication** — all processes on the machine are trusted
+- **No persistence** — properties exist only in process memory; a full bus restart clears all state
+
 ## License
 
 [MIT](LICENSE) — Copyright 2026 Matteo Brichese
