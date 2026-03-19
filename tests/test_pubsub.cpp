@@ -1,69 +1,21 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
-#include <filesystem>
-#include <functional>
 #include <unistd.h>
 #include <msgpack.hpp>
 
 #include "bacaro.h"
 #include "internal.h"
 #include "wire.h"
+#include "test_helpers.h"
 
 static const char *TEST_DIR = "/tmp/bacaro_test_pubsub";
-
-struct Fixture {
-    Fixture()  { setenv("BACARO_RUNTIME_DIR", TEST_DIR, 1);
-                 std::filesystem::create_directories(TEST_DIR); }
-    ~Fixture() { unsetenv("BACARO_RUNTIME_DIR");
-                 std::filesystem::remove_all(TEST_DIR); }
-};
-
-// Pack helpers
-static Frame pack_int(int64_t v)
-{
-    msgpack::sbuffer b; msgpack::pack(b, v);
-    return Frame(b.data(), b.data() + b.size());
-}
-static Frame pack_float(double v)
-{
-    msgpack::sbuffer b; msgpack::pack(b, v);
-    return Frame(b.data(), b.data() + b.size());
-}
-static Frame pack_str(const std::string &s)
-{
-    msgpack::sbuffer b; msgpack::pack(b, s);
-    return Frame(b.data(), b.data() + b.size());
-}
-
-// Unpack helper
-static double unpack_float(const uint8_t *data, size_t len)
-{
-    auto oh = msgpack::unpack(reinterpret_cast<const char *>(data), len);
-    return oh.get().as<double>();
-}
-static int64_t unpack_int(const uint8_t *data, size_t len)
-{
-    auto oh = msgpack::unpack(reinterpret_cast<const char *>(data), len);
-    return oh.get().as<int64_t>();
-}
-
-// Pump both processes until condition or timeout
-static bool pump(bacaro_t *a, bacaro_t *b, std::function<bool()> cond, int tries = 100)
-{
-    for (int i = 0; i < tries && !cond(); ++i) {
-        bacaro_dispatch(a);
-        bacaro_dispatch(b);
-        usleep(3000);
-    }
-    return cond();
-}
 
 // ── bacaro_set ────────────────────────────────────────────────────────────────
 
 TEST_CASE("bacaro_set returns BACARO_OK")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -75,7 +27,7 @@ TEST_CASE("bacaro_set returns BACARO_OK")
 
 TEST_CASE("bacaro_set rejects null arguments")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -89,7 +41,7 @@ TEST_CASE("bacaro_set rejects null arguments")
 
 TEST_CASE("bacaro_set immediately updates local cache")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -105,7 +57,7 @@ TEST_CASE("bacaro_set immediately updates local cache")
 
 TEST_CASE("bacaro_set stores self as publisher")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("powerd");
     REQUIRE(a != nullptr);
 
@@ -121,7 +73,7 @@ TEST_CASE("bacaro_set stores self as publisher")
 
 TEST_CASE("bacaro_set increments sequence counter")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -139,7 +91,7 @@ TEST_CASE("bacaro_set increments sequence counter")
 
 TEST_CASE("bacaro_set last-write-wins on same path")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -157,7 +109,7 @@ TEST_CASE("bacaro_set last-write-wins on same path")
 
 TEST_CASE("bacaro_set supports various msgpack types")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -199,7 +151,7 @@ TEST_CASE("bacaro_set supports various msgpack types")
 
 TEST_CASE("bacaro_get returns BACARO_ENOTFOUND for unknown path")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -211,7 +163,7 @@ TEST_CASE("bacaro_get returns BACARO_ENOTFOUND for unknown path")
 
 TEST_CASE("bacaro_get rejects null arguments")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -228,7 +180,7 @@ TEST_CASE("bacaro_get rejects null arguments")
 
 TEST_CASE("bacaro_get_publisher returns null for unknown path")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -243,7 +195,7 @@ TEST_CASE("bacaro_get_publisher returns null for unknown path")
 
 TEST_CASE("subscriber receives published message via dispatch")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
 
     bacaro_t *pub = bacaro_new("publisher");
     bacaro_t *sub = bacaro_new("subscriber");
@@ -281,7 +233,7 @@ TEST_CASE("subscriber receives published message via dispatch")
 
 TEST_CASE("subscriber does not receive messages outside subscribed domain")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
 
     bacaro_t *pub = bacaro_new("publisher");
     bacaro_t *sub = bacaro_new("subscriber");
@@ -312,7 +264,7 @@ TEST_CASE("subscriber does not receive messages outside subscribed domain")
 
 TEST_CASE("subscribe_all receives all published messages")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
 
     bacaro_t *pub = bacaro_new("publisher");
     bacaro_t *sub = bacaro_new("subscriber");
@@ -344,7 +296,7 @@ TEST_CASE("subscribe_all receives all published messages")
 
 TEST_CASE("on_update callback fires on received message")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
 
     bacaro_t *pub = bacaro_new("publisher");
     bacaro_t *sub = bacaro_new("subscriber");
@@ -379,7 +331,7 @@ TEST_CASE("on_update callback fires on received message")
 
 TEST_CASE("unsubscribe stops receiving messages for that domain")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
 
     bacaro_t *pub = bacaro_new("publisher");
     bacaro_t *sub = bacaro_new("subscriber");
@@ -422,7 +374,7 @@ TEST_CASE("unsubscribe stops receiving messages for that domain")
 
 TEST_CASE("multiple publishers, one subscriber")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
 
     bacaro_t *p1  = bacaro_new("proc1");
     bacaro_t *p2  = bacaro_new("proc2");
@@ -457,7 +409,7 @@ TEST_CASE("multiple publishers, one subscriber")
 
 TEST_CASE("property published by dead process stays in cache")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
 
     bacaro_t *pub = bacaro_new("publisher");
     bacaro_t *sub = bacaro_new("subscriber");

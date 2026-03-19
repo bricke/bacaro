@@ -363,15 +363,20 @@ size_t bacaro_proplist_size(const bacaro_proplist_t *list)
     return list->entries.size();
 }
 
+static inline bool valid_idx(const bacaro_proplist_t *list, size_t idx)
+{
+    return list && idx < list->entries.size();
+}
+
 const char *bacaro_proplist_path(const bacaro_proplist_t *list, size_t idx)
 {
-    if (!list || idx >= list->entries.size()) return nullptr;
+    if (!valid_idx(list, idx)) return nullptr;
     return list->entries[idx].first.c_str();
 }
 
 const uint8_t *bacaro_proplist_value(const bacaro_proplist_t *list, size_t idx, size_t *len)
 {
-    if (!list || idx >= list->entries.size() || !len) return nullptr;
+    if (!valid_idx(list, idx) || !len) return nullptr;
     const auto &entry = list->entries[idx].second;
     *len = entry.payload.size();
     return entry.payload.data();
@@ -379,18 +384,18 @@ const uint8_t *bacaro_proplist_value(const bacaro_proplist_t *list, size_t idx, 
 
 const char *bacaro_proplist_publisher(const bacaro_proplist_t *list, size_t idx)
 {
-    if (!list || idx >= list->entries.size()) return nullptr;
+    if (!valid_idx(list, idx)) return nullptr;
     return list->entries[idx].second.publisher.c_str();
 }
 
 uint64_t bacaro_proplist_sequence(const bacaro_proplist_t *list, size_t idx)
 {
-    if (!list || idx >= list->entries.size()) return 0;
+    if (!valid_idx(list, idx)) return 0;
     return list->entries[idx].second.sequence;
 }
 
 uint64_t bacaro_proplist_timestamp(const bacaro_proplist_t *list, size_t idx)
 {
-    if (!list || idx >= list->entries.size()) return 0;
+    if (!valid_idx(list, idx)) return 0;
     return list->entries[idx].second.timestamp;
 }

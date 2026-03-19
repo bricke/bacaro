@@ -1,0 +1,258 @@
+# Bacaro — Architecture
+
+This document describes the internal design of Bacaro for contributors and AI agents working on the codebase. For the public API, see the [README](../README.md) and [`include/bacaro.h`](../include/bacaro.h).
+
+---
+
+## Overview
+
+Bacaro is a fully brokerless mesh. Every process is both a publisher and a potential snapshot server. There is no privileged node — any process can come and go at any time.
+
+```
+Process A                    Process B
+─────────────────────        ─────────────────────
+PUB ──ipc──────────────────► SUB
+ROUTER ◄──ipc──────────────── DEALER  (snapshot)
+
+SUB ◄──ipc──────────────────── PUB
+DEALER ──ipc────────────────► ROUTER  (snapshot)
+```
+
+Every pair of processes maintains two socket connections in each direction: a PUB/SUB pair for live updates and a DEALER/ROUTER pair for the snapshot protocol.
+
+---
+
+## Lifecycle
+
+### Startup (`bacaro_new`)
+
+1. Generate a UUID for this instance.
+2. Resolve the runtime directory (`BACARO_RUNTIME_DIR`, default `/tmp/bacaro`).
+3. Create the runtime directory if it does not exist.
+4. Bind a `ZMQ_PUB` socket → IPC file `<name>.<uuid>.pub`
+5. Bind a `ZMQ_ROUTER` socket → IPC file `<name>.<uuid>.rep`
+6. Call `discovery_init` (see Discovery below).
+
+The UUID in the filename prevents collisions when a process restarts quickly under the same name.
+
+### Shutdown (`bacaro_destroy`)
+
+1. `discovery_cleanup`: disconnect all peers, close epoll and inotify fds.
+2. Set `ZMQ_LINGER = 200ms` on the PUB socket before closing, so any recently published messages have time to flush to connected peers (see [Slow-Joiner Note](#slow-joiner-note)).
+3. Close and remove the `.pub` and `.rep` IPC files.
+4. Destroy the ZMQ context.
+
+---
+
+## Discovery
+
+**File:** `src/discovery.cpp`
+
+Bacaro uses the filesystem as a service directory and inotify for change notifications.
+
+### Initialisation (`discovery_init`)
+
+1. Create an `epoll` instance (`EPOLL_CLOEXEC`).
+2. Create an `inotify` instance (`IN_NONBLOCK | IN_CLOEXEC`).
+3. Add an inotify watch on the runtime directory for `IN_CREATE | IN_DELETE`.
+4. Register the inotify fd with epoll.
+5. Register the PUB and ROUTER sockets with epoll (via their ZMQ file descriptors).
+6. **Scan the runtime directory** for existing `.pub` files and connect to each peer found.
+
+inotify is set up **before** the directory scan to close the race window where a peer could appear between the scan and the watch being established.
+
+### Peer connect (`discovery_peer_connect`)
+
+Triggered by a new `.pub` file appearing (either from the initial scan or from an inotify `IN_CREATE` event).
+
+1. Extract the peer name from the filename (everything before the first `.`).
+2. Derive the `.rep` filename by replacing the `.pub` suffix.
+3. Create a `ZMQ_SUB` socket, connect to `ipc://<runtime_dir>/<filename>`, apply all current subscriptions.
+4. Create a `ZMQ_DEALER` socket, connect to `ipc://<runtime_dir>/<rep_filename>`.
+5. Register both sockets' ZMQ fds with epoll.
+6. Record the peer in `peers`, `sub_fd_to_filename`, and `dealer_fd_to_filename` maps.
+7. Send a snapshot request for each currently subscribed domain prefix.
+
+### Peer disconnect (`discovery_peer_disconnect`)
+
+Triggered by an inotify `IN_DELETE` event for a `.pub` file.
+
+1. Remove the peer's fds from epoll.
+2. Close the SUB and DEALER sockets.
+3. Remove the peer from all maps.
+
+**Cache entries are intentionally preserved** — the last known values from a dead peer remain available until overwritten.
+
+---
+
+## Subscriptions
+
+**File:** `src/bacaro.cpp`
+
+The process maintains a `std::vector<std::string> subscriptions` list of domain prefixes.
+
+- `bacaro_subscribe(domain)`: adds the prefix, calls `zmq_setsockopt(ZMQ_SUBSCRIBE)` on every existing peer's SUB socket, and sends a snapshot request to every existing peer's DEALER socket for the new domain.
+- `bacaro_subscribe_all()`: calls `bacaro_subscribe("")` — an empty ZMQ subscription prefix matches everything.
+- `bacaro_unsubscribe(domain)`: removes the prefix and calls `zmq_setsockopt(ZMQ_UNSUBSCRIBE)` on all peer SUB sockets.
+
+When a new peer is discovered, the current `subscriptions` list is applied to its SUB socket immediately in `discovery_peer_connect`.
+
+---
+
+## Publishing
+
+**File:** `src/bacaro.cpp`
+
+`bacaro_set(path, msgpack_value, len)`:
+
+1. Increment the per-process monotonic sequence counter.
+2. Record the current timestamp (`CLOCK_REALTIME` via `wire_now_us()`).
+3. Update the **local cache** first (so a late `bacaro_get` after `bacaro_set` returns the new value immediately).
+4. Pack the message into a three-frame ZMQ multipart and send on the PUB socket.
+
+---
+
+## Wire Format
+
+**File:** `src/wire.h`, `src/wire.cpp`
+
+Every published message is a three-frame ZMQ multipart:
+
+```
+Frame 0 — topic   : UTF-8 path string, used as ZMQ SUB prefix filter
+Frame 1 — header  : 18 bytes, packed struct
+                    version(1) | flags(1) | sequence(8) | timestamp(8)
+Frame 2 — payload : raw MessagePack bytes
+```
+
+`WireHeader` is a packed struct (`#pragma pack(1)`). Sequence is a per-publisher monotonic counter; timestamp is microseconds since the Unix epoch.
+
+Flag values:
+
+| Flag | Value | Meaning |
+|------|-------|---------|
+| `BACARO_FLAG_NONE`         | 0x00 | Normal published message |
+| `BACARO_FLAG_SNAPSHOT_REQ` | 0x01 | Snapshot request (DEALER→ROUTER) |
+| `BACARO_FLAG_SNAPSHOT_REP` | 0x02 | Snapshot reply entry (ROUTER→DEALER) |
+| `BACARO_FLAG_SNAPSHOT_END` | 0x03 | End of snapshot (ROUTER→DEALER) |
+
+---
+
+## Snapshot Protocol
+
+**File:** `src/wire.cpp`
+
+The snapshot protocol solves the late-join problem: a process that subscribes to a domain after properties have already been published would otherwise miss them.
+
+### Request (DEALER → ROUTER)
+
+```
+Frame 0 — flag byte : BACARO_FLAG_SNAPSHOT_REQ
+Frame 1 — prefix    : domain prefix string (empty = all)
+```
+
+### Reply (ROUTER → DEALER), one message per matching entry
+
+```
+Frame 0 — identity  : ZMQ ROUTER identity frame
+Frame 1 — flag byte : BACARO_FLAG_SNAPSHOT_REP
+Frame 2 — topic     : property path
+Frame 3 — header    : WireHeader (version, flags, sequence, timestamp)
+Frame 4 — payload   : MessagePack bytes
+```
+
+### End marker
+
+```
+Frame 0 — identity  : ZMQ ROUTER identity frame
+Frame 1 — flag byte : BACARO_FLAG_SNAPSHOT_END
+```
+
+The END marker is always sent, even if a send error occurs mid-snapshot, so the receiving peer is never left blocking indefinitely.
+
+Snapshot requests are sent:
+- When a new peer is discovered (for all currently subscribed domains).
+- When `bacaro_subscribe` is called (for all currently connected peers).
+
+---
+
+## Dispatch Loop
+
+**File:** `src/bacaro.cpp`
+
+`bacaro_dispatch(self)` is the engine of Bacaro. It calls `epoll_wait` with timeout 0 (non-blocking) and processes all ready file descriptors:
+
+| fd | Source | Action |
+|----|--------|--------|
+| `inotify_fd` | Peer arrived / left | `discovery_process_inotify` |
+| `router_fd` | Incoming snapshot request | `snapshot_handle_request` |
+| DEALER fd | Incoming snapshot reply | `snapshot_recv_one` → `apply_message` |
+| SUB fd | Live published message | `wire_recv` + `wire_unpack` → `apply_message` |
+
+`apply_message` updates the local cache and fires the `on_update` callback if registered.
+
+`drain_zmq` is used for ZMQ sockets: it loops calling the handler until `ZMQ_EVENTS` no longer has `ZMQ_POLLIN`, because a single epoll readiness event can correspond to multiple pending ZMQ messages.
+
+### Event loop integration
+
+`bacaro_fd()` returns the epoll fd. Callers can add it to their own `epoll`/`poll`/`select` loop and call `bacaro_dispatch` when it becomes readable. Alternatively, `bacaro_dispatch` can be called periodically (e.g. every 10ms) without epoll integration.
+
+---
+
+## Local Cache
+
+**File:** `src/cache.h`, `src/cache.cpp`
+
+```
+std::unordered_map<std::string, CacheEntry>
+```
+
+Each `CacheEntry` holds:
+- `payload` — the raw MessagePack bytes (`std::vector<uint8_t>`)
+- `publisher` — name of the last process to set this property
+- `sequence` — publisher's monotonic counter at time of publish
+- `timestamp` — microseconds since epoch at time of publish
+
+**Last-write-wins** is enforced simply by overwriting the map entry on every `set`.
+
+**Prefix matching** in `get_prefix(prefix)`:
+- Empty prefix matches everything.
+- Otherwise, a path matches if it equals the prefix exactly, or starts with `prefix + "."` — the dot check prevents `sensors.cpu` from matching `sensors.cpu_fan` (partial segment safety).
+
+---
+
+## Publisher Identity
+
+Publisher identity is inferred from the source socket, not from the wire. The `sub_fd_to_filename` map resolves a SUB socket's fd to its peer filename, from which the peer name is extracted. This avoids adding an identity frame to every published message.
+
+---
+
+## Slow-Joiner Note
+
+ZMQ PUB/SUB has a known "slow-joiner" problem: when a SUB socket connects to a PUB socket, there is a brief window during which subscription filters have not yet propagated. Messages published in this window are silently dropped. Bacaro mitigates this through the snapshot protocol — late joiners always request a full snapshot on connect, so the current state is always recoverable regardless of timing. The `ZMQ_LINGER = 200ms` on the PUB socket at shutdown additionally ensures recently published messages have time to flush before the process exits.
+
+---
+
+## Internal Structs
+
+**File:** `src/internal.h`
+
+### `bacaro_s`
+
+The main handle. One per process. Contains:
+- ZMQ context and bound sockets (`pub_sock`, `router_sock`)
+- `own_pub` — this process's `.pub` filename, used to ignore our own inotify events
+- `peers` map: filename → `PeerInfo`
+- `sub_fd_to_filename` / `dealer_fd_to_filename` — reverse maps for dispatch
+- `cache` — the local property cache
+- `sequence` — monotonic publish counter
+- `subscriptions` — list of subscribed domain prefixes
+- `inotify_fd`, `inotify_wd`, `epoll_fd`
+- `on_update_cb` / `on_update_data` — user callback
+
+### `PeerInfo`
+
+Per-peer connection state:
+- `sub_sock` / `dealer_sock` — ZMQ sockets
+- `name` — peer process name (extracted from filename)
+- `sub_fd` / `dealer_fd` — ZMQ fds registered with epoll

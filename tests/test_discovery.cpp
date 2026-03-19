@@ -1,25 +1,18 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
-#include <filesystem>
 #include <unistd.h>
 
 #include "bacaro.h"
 #include "internal.h"
-
-namespace fs = std::filesystem;
+#include "test_helpers.h"
 
 // Use an isolated runtime dir so tests don't interfere with each other
 static const char *TEST_DIR = "/tmp/bacaro_test_discovery";
 
-struct Fixture {
-    Fixture()  { setenv("BACARO_RUNTIME_DIR", TEST_DIR, 1); fs::create_directories(TEST_DIR); }
-    ~Fixture() { unsetenv("BACARO_RUNTIME_DIR"); fs::remove_all(TEST_DIR); }
-};
-
 TEST_CASE("single instance has no peers on startup")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -30,7 +23,7 @@ TEST_CASE("single instance has no peers on startup")
 
 TEST_CASE("second instance discovers first")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -51,7 +44,7 @@ TEST_CASE("second instance discovers first")
 
 TEST_CASE("bacaro_fd returns a valid epoll fd")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -63,7 +56,7 @@ TEST_CASE("bacaro_fd returns a valid epoll fd")
 
 TEST_CASE("peer disconnect removes peer but preserves cache")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     bacaro_t *b = bacaro_new("beta");
     REQUIRE(a != nullptr);
@@ -95,7 +88,7 @@ TEST_CASE("peer disconnect removes peer but preserves cache")
 
 TEST_CASE("subscribe applies filter to existing and new peers")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -126,7 +119,7 @@ TEST_CASE("subscribe applies filter to existing and new peers")
 
 TEST_CASE("unsubscribe removes subscription")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
