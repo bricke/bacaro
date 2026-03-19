@@ -23,29 +23,27 @@ static int get_zmq_fd(void *sock)
     return fd;
 }
 
-static void epoll_add(int epoll_fd, int fd)
+static void epoll_modify(int epoll_fd, int fd, int op)
 {
     struct epoll_event ev{};
     ev.events  = EPOLLIN;
     ev.data.fd = fd;
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev);
-}
-
-static void epoll_remove(int epoll_fd, int fd)
-{
-    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr);
+    epoll_ctl(epoll_fd, op, fd, op == EPOLL_CTL_DEL ? nullptr : &ev);
 }
 
 void discovery_epoll_add_zmq(bacaro_t *self, void *sock)
 {
-    int fd = get_zmq_fd(sock);
-    epoll_add(self->epoll_fd, fd);
+    epoll_modify(self->epoll_fd, get_zmq_fd(sock), EPOLL_CTL_ADD);
 }
 
 void discovery_epoll_remove_zmq(bacaro_t *self, void *sock)
 {
-    int fd = get_zmq_fd(sock);
-    epoll_remove(self->epoll_fd, fd);
+    epoll_modify(self->epoll_fd, get_zmq_fd(sock), EPOLL_CTL_DEL);
+}
+
+static std::string ipc_endpoint(const bacaro_t *self, const std::string &filename)
+{
+    return "ipc://" + self->runtime_dir + "/" + filename;
 }
 
 void discovery_apply_subscriptions(bacaro_t *self, void *sub_sock)
@@ -72,15 +70,14 @@ int discovery_peer_connect(bacaro_t *self, const std::string &filename)
     if (!sub_sock)
         return BACARO_EZMQ;
 
-    std::string pub_ep = "ipc://" + self->runtime_dir + "/" + filename;
-    if (zmq_connect(sub_sock, pub_ep.c_str()) != 0) {
+    if (zmq_connect(sub_sock, ipc_endpoint(self, filename).c_str()) != 0) {
         zmq_close(sub_sock);
         return BACARO_EZMQ;
     }
     discovery_apply_subscriptions(self, sub_sock);
 
     int sub_fd = get_zmq_fd(sub_sock);
-    epoll_add(self->epoll_fd, sub_fd);
+    epoll_modify(self->epoll_fd, sub_fd, EPOLL_CTL_ADD);
 
     // ── DEALER socket ────────────────────────────────────────────────────────
     void *dealer_sock = zmq_socket(self->zmq_ctx, ZMQ_DEALER);
@@ -89,15 +86,14 @@ int discovery_peer_connect(bacaro_t *self, const std::string &filename)
         return BACARO_EZMQ;
     }
 
-    std::string rep_ep = "ipc://" + self->runtime_dir + "/" + rep_filename;
-    if (zmq_connect(dealer_sock, rep_ep.c_str()) != 0) {
+    if (zmq_connect(dealer_sock, ipc_endpoint(self, rep_filename).c_str()) != 0) {
         zmq_close(sub_sock);
         zmq_close(dealer_sock);
         return BACARO_EZMQ;
     }
 
     int dealer_fd = get_zmq_fd(dealer_sock);
-    epoll_add(self->epoll_fd, dealer_fd);
+    epoll_modify(self->epoll_fd, dealer_fd, EPOLL_CTL_ADD);
 
     // Register in maps
     self->peers[filename]              = { sub_sock, dealer_sock, peer_name, sub_fd, dealer_fd };
@@ -119,8 +115,8 @@ void discovery_peer_disconnect(bacaro_t *self, const std::string &filename)
 
     auto &peer = it->second;
 
-    epoll_remove(self->epoll_fd, peer.sub_fd);
-    epoll_remove(self->epoll_fd, peer.dealer_fd);
+    epoll_modify(self->epoll_fd, peer.sub_fd, EPOLL_CTL_DEL);
+    epoll_modify(self->epoll_fd, peer.dealer_fd, EPOLL_CTL_DEL);
 
     self->sub_fd_to_filename.erase(peer.sub_fd);
     self->dealer_fd_to_filename.erase(peer.dealer_fd);
@@ -198,8 +194,8 @@ int discovery_init(bacaro_t *self)
 void discovery_cleanup(bacaro_t *self)
 {
     for (auto &[filename, peer] : self->peers) {
-        epoll_remove(self->epoll_fd, peer.sub_fd);
-        epoll_remove(self->epoll_fd, peer.dealer_fd);
+        epoll_modify(self->epoll_fd, peer.sub_fd, EPOLL_CTL_DEL);
+        epoll_modify(self->epoll_fd, peer.dealer_fd, EPOLL_CTL_DEL);
         zmq_close(peer.sub_sock);
         zmq_close(peer.dealer_sock);
     }
