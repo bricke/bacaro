@@ -31,6 +31,16 @@ static void epoll_modify(int epoll_fd, int fd, int op)
     epoll_ctl(epoll_fd, op, fd, op == EPOLL_CTL_DEL ? nullptr : &ev);
 }
 
+static void close_peer(bacaro_t *self, PeerInfo &peer)
+{
+    epoll_modify(self->epoll_fd, peer.sub_fd,    EPOLL_CTL_DEL);
+    epoll_modify(self->epoll_fd, peer.dealer_fd, EPOLL_CTL_DEL);
+    self->sub_fd_to_filename.erase(peer.sub_fd);
+    self->dealer_fd_to_filename.erase(peer.dealer_fd);
+    zmq_close(peer.sub_sock);
+    zmq_close(peer.dealer_sock);
+}
+
 void discovery_epoll_add_zmq(bacaro_t *self, void *sock)
 {
     epoll_modify(self->epoll_fd, get_zmq_fd(sock), EPOLL_CTL_ADD);
@@ -113,17 +123,7 @@ void discovery_peer_disconnect(bacaro_t *self, const std::string &filename)
     if (it == self->peers.end())
         return;
 
-    auto &peer = it->second;
-
-    epoll_modify(self->epoll_fd, peer.sub_fd, EPOLL_CTL_DEL);
-    epoll_modify(self->epoll_fd, peer.dealer_fd, EPOLL_CTL_DEL);
-
-    self->sub_fd_to_filename.erase(peer.sub_fd);
-    self->dealer_fd_to_filename.erase(peer.dealer_fd);
-
-    zmq_close(peer.sub_sock);
-    zmq_close(peer.dealer_sock);
-
+    close_peer(self, it->second);
     self->peers.erase(it);
     // Cache entries intentionally preserved
 }
@@ -170,10 +170,7 @@ int discovery_init(bacaro_t *self)
     if (self->inotify_wd < 0)
         return BACARO_EZMQ;
 
-    struct epoll_event ev{};
-    ev.events  = EPOLLIN;
-    ev.data.fd = self->inotify_fd;
-    epoll_ctl(self->epoll_fd, EPOLL_CTL_ADD, self->inotify_fd, &ev);
+    epoll_modify(self->epoll_fd, self->inotify_fd, EPOLL_CTL_ADD);
 
     // Register PUB and ROUTER in epoll; remember router's ZMQ_FD for dispatch
     discovery_epoll_add_zmq(self, self->pub_sock);
@@ -193,15 +190,9 @@ int discovery_init(bacaro_t *self)
 
 void discovery_cleanup(bacaro_t *self)
 {
-    for (auto &[filename, peer] : self->peers) {
-        epoll_modify(self->epoll_fd, peer.sub_fd, EPOLL_CTL_DEL);
-        epoll_modify(self->epoll_fd, peer.dealer_fd, EPOLL_CTL_DEL);
-        zmq_close(peer.sub_sock);
-        zmq_close(peer.dealer_sock);
-    }
+    for (auto &[filename, peer] : self->peers)
+        close_peer(self, peer);
     self->peers.clear();
-    self->sub_fd_to_filename.clear();
-    self->dealer_fd_to_filename.clear();
 
     if (self->inotify_fd >= 0) {
         close(self->inotify_fd);
