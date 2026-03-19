@@ -1,33 +1,14 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
-#include <filesystem>
 #include <unistd.h>
 #include <set>
-#include <msgpack.hpp>
 
 #include "bacaro.h"
 #include "internal.h"
+#include "test_helpers.h"
 
 static const char *TEST_DIR = "/tmp/bacaro_test_get_domain";
-
-struct Fixture {
-    Fixture()  { setenv("BACARO_RUNTIME_DIR", TEST_DIR, 1);
-                 std::filesystem::create_directories(TEST_DIR); }
-    ~Fixture() { unsetenv("BACARO_RUNTIME_DIR");
-                 std::filesystem::remove_all(TEST_DIR); }
-};
-
-static Frame pack_float(double v)
-{
-    msgpack::sbuffer b; msgpack::pack(b, v);
-    return Frame(b.data(), b.data() + b.size());
-}
-
-static double unpack_float(const uint8_t *data, size_t len)
-{
-    return msgpack::unpack(reinterpret_cast<const char *>(data), len).get().as<double>();
-}
 
 // Collect all paths from a proplist into a set for order-independent checks
 static std::set<std::string> proplist_paths(const bacaro_proplist_t *list)
@@ -42,7 +23,7 @@ static std::set<std::string> proplist_paths(const bacaro_proplist_t *list)
 
 TEST_CASE("bacaro_get_domain rejects null arguments")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -61,7 +42,7 @@ TEST_CASE("bacaro_proplist_destroy is safe on null")
 
 TEST_CASE("proplist accessors return safe defaults on out-of-bounds index")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -91,7 +72,7 @@ TEST_CASE("proplist accessors return safe defaults on out-of-bounds index")
 
 TEST_CASE("bacaro_get_domain returns empty list for unknown domain")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -108,7 +89,7 @@ TEST_CASE("bacaro_get_domain returns empty list for unknown domain")
 
 TEST_CASE("bacaro_get_domain returns all matching properties")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -159,7 +140,7 @@ TEST_CASE("bacaro_get_domain returns all matching properties")
 
 TEST_CASE("bacaro_proplist_value returns correct data")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -181,7 +162,7 @@ TEST_CASE("bacaro_proplist_value returns correct data")
 
 TEST_CASE("bacaro_proplist_publisher returns correct publisher")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("powerd");
     REQUIRE(a != nullptr);
 
@@ -200,7 +181,7 @@ TEST_CASE("bacaro_proplist_publisher returns correct publisher")
 
 TEST_CASE("bacaro_proplist_sequence and timestamp are populated")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -227,7 +208,7 @@ TEST_CASE("bacaro_proplist_sequence and timestamp are populated")
 
 TEST_CASE("bacaro_get_domain does not match partial segment names")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
     bacaro_t *a = bacaro_new("alpha");
     REQUIRE(a != nullptr);
 
@@ -249,7 +230,7 @@ TEST_CASE("bacaro_get_domain does not match partial segment names")
 
 TEST_CASE("bacaro_get_domain returns properties received from remote publisher")
 {
-    Fixture f;
+    Fixture f(TEST_DIR);
 
     bacaro_t *pub = bacaro_new("publisher");
     bacaro_t *sub = bacaro_new("subscriber");
@@ -266,14 +247,10 @@ TEST_CASE("bacaro_get_domain returns properties received from remote publisher")
     bacaro_set(pub, "sensors.cpu.temp", v1.data(), v1.size());
     bacaro_set(pub, "sensors.gpu.temp", v2.data(), v2.size());
 
-    // Pump until both arrive
-    for (int i = 0; i < 100; ++i) {
-        bacaro_dispatch(pub);
-        bacaro_dispatch(sub);
-        if (sub->cache.get("sensors.cpu.temp") && sub->cache.get("sensors.gpu.temp"))
-            break;
-        usleep(3000);
-    }
+    pump(pub, sub, [&]() {
+        return sub->cache.get("sensors.cpu.temp") != nullptr
+            && sub->cache.get("sensors.gpu.temp") != nullptr;
+    });
 
     REQUIRE(sub->cache.get("sensors.cpu.temp") != nullptr);
     REQUIRE(sub->cache.get("sensors.gpu.temp") != nullptr);
