@@ -1,7 +1,12 @@
 ![Bacaro](media/bacaro-banner.png)
 
-[![CI](https://github.com/bricke/bacaro/actions/workflows/ci.yml/badge.svg)](https://github.com/bricke/bacaro/actions/workflows/ci.yml)
+<div align="center">
+
+[![CI (GCC)](https://github.com/bricke/bacaro/actions/workflows/ci.yml/badge.svg)](https://github.com/bricke/bacaro/actions/workflows/ci.yml)
+[![CI (Clang)](https://github.com/bricke/bacaro/actions/workflows/ci-clang.yml/badge.svg)](https://github.com/bricke/bacaro/actions/workflows/ci-clang.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+</div>
 
 A reliable, brokerless message bus for single-machine use. Processes publish named properties and subscribe to the domains they care about. Each process maintains a local cache — no central broker, no single point of failure.
 
