@@ -45,7 +45,7 @@ target_link_libraries(bacaro
         msgpack-cxx
 )
 
-target_compile_options(bacaro PRIVATE ${ZMQ_CFLAGS_OTHER})
+target_compile_options(bacaro PRIVATE ${ZMQ_CFLAGS_OTHER} -Wall -Wextra -Wpedantic)
 
 # Tools — disabled by setting BACARO_BUILD_TOOLS=OFF (CMake option or env variable)
 option(BACARO_BUILD_TOOLS "Build Bacaro tools (oste / bacaro-monitor)" ON)
