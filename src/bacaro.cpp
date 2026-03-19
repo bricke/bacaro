@@ -53,6 +53,16 @@ static void apply_message(bacaro_t *self, const WireMessage &msg, const std::str
                            self->on_update_data);
 }
 
+// Look up a peer by ZMQ fd using the given fd→filename reverse map
+static PeerInfo *find_peer(bacaro_t *self,
+                           const std::unordered_map<int, std::string> &fd_map, int fd)
+{
+    auto fit = fd_map.find(fd);
+    if (fit == fd_map.end()) return nullptr;
+    auto pit = self->peers.find(fit->second);
+    return pit != self->peers.end() ? &pit->second : nullptr;
+}
+
 // Drain all pending ZMQ messages from a socket, calling handler for each
 static void drain_zmq(void *sock, const std::function<void(void *)> &handler)
 {
@@ -283,44 +293,28 @@ int bacaro_dispatch(bacaro_t *self)
         }
 
         // ── DEALER: incoming snapshot reply ──────────────────────────────
-        {
-            auto dit = self->dealer_fd_to_filename.find(fd);
-            if (dit != self->dealer_fd_to_filename.end()) {
-                auto pit = self->peers.find(dit->second);
-                if (pit != self->peers.end()) {
-                    const std::string &peer_name = pit->second.name;
-                    void *dealer = pit->second.dealer_sock;
-                    drain_zmq(dealer, [&](void *sock) {
-                        WireMessage msg;
-                        bool is_end = false;
-                        if (snapshot_recv_one(sock, msg, is_end) != BACARO_OK || is_end)
-                            return;
-                        apply_message(self, msg, peer_name);
-                    });
-                }
-                continue;
-            }
+        if (auto *peer = find_peer(self, self->dealer_fd_to_filename, fd)) {
+            drain_zmq(peer->dealer_sock, [&](void *sock) {
+                WireMessage msg;
+                bool is_end = false;
+                if (snapshot_recv_one(sock, msg, is_end) != BACARO_OK || is_end)
+                    return;
+                apply_message(self, msg, peer->name);
+            });
+            continue;
         }
 
         // ── SUB: live published message from a peer ───────────────────────
-        {
-            auto sit = self->sub_fd_to_filename.find(fd);
-            if (sit != self->sub_fd_to_filename.end()) {
-                auto pit = self->peers.find(sit->second);
-                if (pit != self->peers.end()) {
-                    const std::string &peer_name = pit->second.name;
-                    void *sub = pit->second.sub_sock;
-                    drain_zmq(sub, [&](void *sock) {
-                        Frames frames;
-                        if (wire_recv(sock, frames) != BACARO_OK)
-                            return;
-                        WireMessage msg;
-                        if (wire_unpack(frames, msg) != BACARO_OK)
-                            return;
-                        apply_message(self, msg, peer_name);
-                    });
-                }
-            }
+        if (auto *peer = find_peer(self, self->sub_fd_to_filename, fd)) {
+            drain_zmq(peer->sub_sock, [&](void *sock) {
+                Frames frames;
+                if (wire_recv(sock, frames) != BACARO_OK)
+                    return;
+                WireMessage msg;
+                if (wire_unpack(frames, msg) != BACARO_OK)
+                    return;
+                apply_message(self, msg, peer->name);
+            });
         }
     }
 
