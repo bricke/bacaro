@@ -308,6 +308,8 @@ ctest --test-dir build --output-on-failure
 ## Design constraints
 
 - **Single machine only** — IPC transport (`ipc://`), not TCP
+- **Single-threaded** — all calls on a `bacaro_t` instance must happen from one thread (the event-loop thread). ZMQ sockets are not safe for concurrent use, and `bacaro_get` returns interior pointers invalidated by the next `set`/`dispatch`. If you need multi-threaded access, protect the instance with an external mutex.
+- **Linux only** — uses epoll and inotify for event dispatch and peer discovery
 - **No authentication** — all processes on the machine are trusted
 - **No persistence** — properties exist only in process memory; a full bus restart clears all state
 - **C++17** — internal implementation; public API is C-compatible (`extern "C"`)
