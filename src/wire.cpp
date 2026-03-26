@@ -18,34 +18,36 @@ uint64_t wire_now_us()
 
 Frames wire_pack(const WireMessage &msg)
 {
-    Frames frames(3);
+    Frames frames(4);
 
     frames[0].assign(msg.topic.begin(), msg.topic.end());
+    frames[1].assign(msg.publisher.begin(), msg.publisher.end());
 
-    frames[1].resize(sizeof(WireHeader));
-    std::memcpy(frames[1].data(), &msg.header, sizeof(WireHeader));
+    frames[2].resize(sizeof(WireHeader));
+    std::memcpy(frames[2].data(), &msg.header, sizeof(WireHeader));
 
-    frames[2] = msg.payload;
+    frames[3] = msg.payload;
 
     return frames;
 }
 
 int wire_unpack(const Frames &frames, WireMessage &out)
 {
-    if (frames.size() < 3)
+    if (frames.size() < 4)
         return BACARO_EINVAL;
 
-    if (frames[1].size() != sizeof(WireHeader))
+    if (frames[2].size() != sizeof(WireHeader))
         return BACARO_EINVAL;
 
     out.topic.assign(frames[0].begin(), frames[0].end());
+    out.publisher.assign(frames[1].begin(), frames[1].end());
 
-    std::memcpy(&out.header, frames[1].data(), sizeof(WireHeader));
+    std::memcpy(&out.header, frames[2].data(), sizeof(WireHeader));
 
     if (out.header.version != BACARO_WIRE_VERSION)
         return BACARO_EINVAL;
 
-    out.payload = frames[2];
+    out.payload = frames[3];
 
     return BACARO_OK;
 }
@@ -127,7 +129,7 @@ int snapshot_handle_request(void *router_sock, const Cache &cache)
     // don't corrupt a half-written multipart message on the wire.
     auto entries = cache.get_prefix(prefix);
     for (const auto &[path, entry] : entries) {
-        // [identity][REP_flag][topic][header][payload]
+        // [identity][REP_flag][topic][publisher][header][payload]
         WireHeader hdr = {
             BACARO_WIRE_VERSION,
             BACARO_FLAG_SNAPSHOT_REP,
@@ -139,6 +141,7 @@ int snapshot_handle_request(void *router_sock, const Cache &cache)
         if (send_frame(identity.data(), identity.size(), ZMQ_SNDMORE) != BACARO_OK
          || send_frame(&rep_flag, 1, ZMQ_SNDMORE) != BACARO_OK
          || send_frame(path.data(), path.size(), ZMQ_SNDMORE) != BACARO_OK
+         || send_frame(entry.publisher.data(), entry.publisher.size(), ZMQ_SNDMORE) != BACARO_OK
          || send_frame(&hdr, sizeof(hdr), ZMQ_SNDMORE) != BACARO_OK
          || send_frame(entry.payload.data(), entry.payload.size(), 0) != BACARO_OK)
             break;
@@ -172,15 +175,16 @@ int snapshot_recv_one(void *dealer_sock, WireMessage &out, bool &is_end)
         return BACARO_OK;
     }
 
-    if (flag != BACARO_FLAG_SNAPSHOT_REP || frames.size() < 4)
+    if (flag != BACARO_FLAG_SNAPSHOT_REP || frames.size() < 5)
         return BACARO_EINVAL;
 
-    if (frames[2].size() != sizeof(WireHeader))
+    if (frames[3].size() != sizeof(WireHeader))
         return BACARO_EINVAL;
 
     out.topic.assign(frames[1].begin(), frames[1].end());
-    std::memcpy(&out.header, frames[2].data(), sizeof(WireHeader));
-    out.payload = frames[3];
+    out.publisher.assign(frames[2].begin(), frames[2].end());
+    std::memcpy(&out.header, frames[3].data(), sizeof(WireHeader));
+    out.payload = frames[4];
 
     return BACARO_OK;
 }

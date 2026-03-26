@@ -8,7 +8,7 @@
 class Cache;
 
 // Wire format version
-static constexpr uint8_t BACARO_WIRE_VERSION = 1;
+static constexpr uint8_t BACARO_WIRE_VERSION = 2;
 
 // Flags
 static constexpr uint8_t BACARO_FLAG_NONE         = 0x00;
@@ -34,7 +34,7 @@ struct WireMessage {
     std::string  topic;      // "domain.sub.property"
     WireHeader   header;
     Frame        payload;    // msgpack bytes
-    std::string  publisher;  // filled by receiver from socket mapping
+    std::string  publisher;  // carried on the wire since v2
 };
 
 // ── Publish encode/decode ─────────────────────────────────────────────────────
