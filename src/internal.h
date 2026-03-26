@@ -16,10 +16,11 @@ struct bacaro_proplist_s {
 };
 
 struct PeerInfo {
-    void        *dealer_sock;   // per-peer ZMQ_DEALER for snapshot requests/replies
-    std::string  name;          // peer process name
-    std::string  pub_endpoint;  // "ipc://..." for zmq_disconnect on the shared SUB
-    int          dealer_fd;     // ZMQ_FD of dealer_sock (epoll)
+    void        *dealer_sock = nullptr; // per-peer ZMQ_DEALER, created lazily on first subscribe
+    std::string  name;                  // peer process name
+    std::string  pub_endpoint;          // "ipc://..." for zmq_disconnect on the shared SUB
+    std::string  rep_endpoint;          // "ipc://..." for lazy DEALER connect
+    int          dealer_fd   = -1;      // ZMQ_FD of dealer_sock (epoll)
 };
 
 struct bacaro_s {

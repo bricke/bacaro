@@ -34,9 +34,33 @@ static void epoll_modify(int epoll_fd, int fd, int op)
 static void close_peer(bacaro_t *self, PeerInfo &peer)
 {
     zmq_disconnect(self->sub_sock, peer.pub_endpoint.c_str());
-    epoll_modify(self->epoll_fd, peer.dealer_fd, EPOLL_CTL_DEL);
-    self->dealer_fd_to_filename.erase(peer.dealer_fd);
-    zmq_close(peer.dealer_sock);
+    if (peer.dealer_sock) {
+        epoll_modify(self->epoll_fd, peer.dealer_fd, EPOLL_CTL_DEL);
+        self->dealer_fd_to_filename.erase(peer.dealer_fd);
+        zmq_close(peer.dealer_sock);
+    }
+}
+
+int discovery_ensure_dealer(bacaro_t *self, const std::string &filename, PeerInfo &peer)
+{
+    if (peer.dealer_sock)
+        return BACARO_OK;
+
+    peer.dealer_sock = zmq_socket(self->zmq_ctx, ZMQ_DEALER);
+    if (!peer.dealer_sock)
+        return BACARO_EZMQ;
+
+    if (zmq_connect(peer.dealer_sock, peer.rep_endpoint.c_str()) != 0) {
+        zmq_close(peer.dealer_sock);
+        peer.dealer_sock = nullptr;
+        return BACARO_EZMQ;
+    }
+
+    peer.dealer_fd = get_zmq_fd(peer.dealer_sock);
+    epoll_modify(self->epoll_fd, peer.dealer_fd, EPOLL_CTL_ADD);
+    self->dealer_fd_to_filename[peer.dealer_fd] = filename;
+
+    return BACARO_OK;
 }
 
 void discovery_epoll_add_zmq(bacaro_t *self, void *sock)
@@ -78,29 +102,20 @@ int discovery_peer_connect(bacaro_t *self, const std::string &filename)
     if (zmq_connect(self->sub_sock, pub_ep.c_str()) != 0)
         return BACARO_EZMQ;
 
-    // ── Per-peer DEALER socket for snapshot ──────────────────────────────
-    void *dealer_sock = zmq_socket(self->zmq_ctx, ZMQ_DEALER);
-    if (!dealer_sock) {
-        zmq_disconnect(self->sub_sock, pub_ep.c_str());
-        return BACARO_EZMQ;
+    std::string rep_ep = ipc_endpoint(self, rep_filename);
+    self->peers[filename] = { nullptr, peer_name, pub_ep, rep_ep, -1 };
+
+    // ── Lazy DEALER: only create if we have active subscriptions ─────────
+    if (!self->subscriptions.empty()) {
+        if (discovery_ensure_dealer(self, filename, self->peers[filename]) != BACARO_OK) {
+            zmq_disconnect(self->sub_sock, pub_ep.c_str());
+            self->peers.erase(filename);
+            return BACARO_EZMQ;
+        }
+
+        for (const auto &prefix : self->subscriptions)
+            snapshot_send_request(self->peers[filename].dealer_sock, prefix);
     }
-
-    if (zmq_connect(dealer_sock, ipc_endpoint(self, rep_filename).c_str()) != 0) {
-        zmq_close(dealer_sock);
-        zmq_disconnect(self->sub_sock, pub_ep.c_str());
-        return BACARO_EZMQ;
-    }
-
-    int dealer_fd = get_zmq_fd(dealer_sock);
-    epoll_modify(self->epoll_fd, dealer_fd, EPOLL_CTL_ADD);
-
-    // Register in maps
-    self->peers[filename] = { dealer_sock, peer_name, pub_ep, dealer_fd };
-    self->dealer_fd_to_filename[dealer_fd] = filename;
-
-    // Send snapshot request for each subscribed domain
-    for (const auto &prefix : self->subscriptions)
-        snapshot_send_request(dealer_sock, prefix);
 
     return BACARO_OK;
 }

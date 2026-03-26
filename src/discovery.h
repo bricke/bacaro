@@ -13,6 +13,10 @@ void discovery_cleanup(bacaro_t *self);
 // Apply all current subscriptions to the shared SUB socket.
 void discovery_apply_subscriptions(bacaro_t *self);
 
+// Create a DEALER socket for a peer if it doesn't have one yet.
+// Called lazily on first subscribe.
+int discovery_ensure_dealer(bacaro_t *self, const std::string &filename, PeerInfo &peer);
+
 // Connect to a peer's PUB file (filename only, not full path).
 // No-op if already connected.
 int discovery_peer_connect(bacaro_t *self, const std::string &filename);
