@@ -63,3 +63,28 @@ inotify does not work on NFS or other network filesystems. `BACARO_RUNTIME_DIR` 
 ## No property size limit
 
 Bacaro does not enforce a maximum property value size. Very large MessagePack payloads will be held in memory by every subscriber and transmitted in full during every snapshot. Keep property values small — they are meant to represent state (a temperature, a status string, a counter), not bulk data.
+
+---
+
+## Scalability: process count vs. file descriptor usage
+
+Bacaro uses a **shared SUB socket** for live updates (one socket, O(1) fds regardless of peer count) and **per-peer DEALER sockets** for the snapshot protocol. Per-process fd cost is roughly `3N + 15`, where N is the total number of processes (dominated by per-peer DEALER sockets and their internal ZMQ fds).
+
+**Per-process fd usage and system-wide total:**
+
+| Processes (N) | fds per process | System-wide fds | Assessment |
+|---------------|----------------|-----------------|------------|
+| 10  | ~45   | ~450    | No tuning needed |
+| 50  | ~165  | ~8,250  | No tuning needed |
+| 100 | ~315  | ~31,500 | No tuning needed |
+| 200 | ~615  | ~123,000 | Comfortable, ulimit tuning recommended |
+| 300 | ~915  | ~274,500 | Approaching default `ulimit -n 1024` per process |
+| 500 | ~1,515 | ~757,500 | Requires `ulimit -n 4096` |
+| 700+ | ~2,115 | ~1,480,000 | Consider a broker or hierarchy |
+
+**Sweet spot:** 50–200 processes. Bacaro performs well with zero tuning in this range.
+
+**Additional constraints at high N:**
+- **Snapshot storm on join:** a new process fires N-1 snapshot requests simultaneously; join latency grows as O(N × cache size).
+- **Memory:** ~75KB per ZMQ socket × (N-1) DEALER sockets ≈ 15MB per process at N=200.
+- **ulimit:** raise `ulimit -n` (or set in `/etc/security/limits.conf`) before crossing ~300 processes.
