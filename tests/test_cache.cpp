@@ -37,6 +37,44 @@ TEST_CASE("last-write-wins on overwrite")
     CHECK(e->sequence  == 2);
 }
 
+TEST_CASE("stale update is discarded")
+{
+    Cache c;
+    c.set("display.backlight", make_payload(70), "lightsensor", 1, 2000);
+    c.set("display.backlight", make_payload(30), "battery",     1, 1000);
+
+    const CacheEntry *e = c.get("display.backlight");
+    REQUIRE(e != nullptr);
+    CHECK(e->payload   == make_payload(70));
+    CHECK(e->publisher == "lightsensor");
+    CHECK(e->timestamp == 2000);
+}
+
+TEST_CASE("equal timestamp breaks tie by publisher name")
+{
+    Cache c;
+
+    SUBCASE("arrival order A then B converges")
+    {
+        c.set("display.backlight", make_payload(30), "battery",     1, 5000);
+        c.set("display.backlight", make_payload(70), "lightsensor", 1, 5000);
+
+        const CacheEntry *e = c.get("display.backlight");
+        REQUIRE(e != nullptr);
+        CHECK(e->publisher == "lightsensor");
+    }
+
+    SUBCASE("arrival order B then A converges to same result")
+    {
+        c.set("display.backlight", make_payload(70), "lightsensor", 1, 5000);
+        c.set("display.backlight", make_payload(30), "battery",     1, 5000);
+
+        const CacheEntry *e = c.get("display.backlight");
+        REQUIRE(e != nullptr);
+        CHECK(e->publisher == "lightsensor");
+    }
+}
+
 TEST_CASE("get_prefix returns matching entries")
 {
     Cache c;
