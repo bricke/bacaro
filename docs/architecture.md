@@ -213,7 +213,7 @@ Each `CacheEntry` holds:
 - `sequence` — publisher's monotonic counter at time of publish
 - `timestamp` — microseconds since epoch at time of publish
 
-**Last-write-wins** is enforced simply by overwriting the map entry on every `set`.
+**Last-write-wins** with convergence guarantee: multiple processes can write to the same path (e.g. a battery monitor, light sensor, and user process all adjusting `display.backlight`). `Cache::set` discards stale updates — the entry with the highest timestamp wins. On equal timestamps, the lexicographically higher publisher name is used as a deterministic tiebreaker, ensuring all nodes converge to the same value regardless of message arrival order.
 
 **Prefix matching** in `get_prefix(prefix)`:
 - Empty prefix matches everything.
