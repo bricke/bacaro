@@ -11,14 +11,14 @@ Bacaro is a fully brokerless mesh. Every process is both a publisher and a poten
 ```
 Process A                    Process B
 ─────────────────────        ─────────────────────
-PUB ──ipc──────────────────► SUB
+PUB ──ipc──────────────────► shared SUB
 ROUTER ◄──ipc──────────────── DEALER  (snapshot)
 
-SUB ◄──ipc──────────────────── PUB
+shared SUB ◄──ipc──────────── PUB
 DEALER ──ipc────────────────► ROUTER  (snapshot)
 ```
 
-Every pair of processes maintains two socket connections in each direction: a PUB/SUB pair for live updates and a DEALER/ROUTER pair for the snapshot protocol.
+Each process uses a **single shared SUB socket** that connects to every peer's PUB endpoint (via `zmq_connect`/`zmq_disconnect`). This keeps live-update fd usage at O(1) regardless of peer count. Per-peer **DEALER sockets** are still used for the snapshot protocol, since ZMQ DEALER round-robins outgoing messages.
 
 ---
 
@@ -53,11 +53,12 @@ Bacaro uses the filesystem as a service directory and inotify for change notific
 ### Initialisation (`discovery_init`)
 
 1. Create an `epoll` instance (`EPOLL_CLOEXEC`).
-2. Create an `inotify` instance (`IN_NONBLOCK | IN_CLOEXEC`).
-3. Add an inotify watch on the runtime directory for `IN_CREATE | IN_DELETE`.
-4. Register the inotify fd with epoll.
-5. Register the PUB and ROUTER sockets with epoll (via their ZMQ file descriptors).
-6. **Scan the runtime directory** for existing `.pub` files and connect to each peer found.
+2. Create the **shared SUB socket** and register its fd with epoll.
+3. Create an `inotify` instance (`IN_NONBLOCK | IN_CLOEXEC`).
+4. Add an inotify watch on the runtime directory for `IN_CREATE | IN_DELETE`.
+5. Register the inotify fd with epoll.
+6. Register the PUB and ROUTER sockets with epoll (via their ZMQ file descriptors).
+7. **Scan the runtime directory** for existing `.pub` files and connect to each peer found.
 
 inotify is set up **before** the directory scan to close the race window where a peer could appear between the scan and the watch being established.
 
@@ -67,18 +68,18 @@ Triggered by a new `.pub` file appearing (either from the initial scan or from a
 
 1. Extract the peer name from the filename (everything before the first `.`).
 2. Derive the `.rep` filename by replacing the `.pub` suffix.
-3. Create a `ZMQ_SUB` socket, connect to `ipc://<runtime_dir>/<filename>`, apply all current subscriptions.
-4. Create a `ZMQ_DEALER` socket, connect to `ipc://<runtime_dir>/<rep_filename>`.
-5. Register both sockets' ZMQ fds with epoll.
-6. Record the peer in `peers`, `sub_fd_to_filename`, and `dealer_fd_to_filename` maps.
+3. Call `zmq_connect` on the **shared SUB socket** to the peer's PUB endpoint.
+4. Create a per-peer `ZMQ_DEALER` socket, connect to `ipc://<runtime_dir>/<rep_filename>`.
+5. Register the DEALER socket's ZMQ fd with epoll.
+6. Record the peer in `peers` and `dealer_fd_to_filename` maps. Store the PUB endpoint string for later `zmq_disconnect`.
 7. Send a snapshot request for each currently subscribed domain prefix.
 
 ### Peer disconnect (`discovery_peer_disconnect`)
 
 Triggered by an inotify `IN_DELETE` event for a `.pub` file.
 
-1. Remove the peer's fds from epoll.
-2. Close the SUB and DEALER sockets.
+1. Call `zmq_disconnect` on the shared SUB socket for the peer's PUB endpoint.
+2. Remove the DEALER fd from epoll and close the DEALER socket.
 3. Remove the peer from all maps.
 
 **Cache entries are intentionally preserved** — the last known values from a dead peer remain available until overwritten.
@@ -91,11 +92,11 @@ Triggered by an inotify `IN_DELETE` event for a `.pub` file.
 
 The process maintains a `std::vector<std::string> subscriptions` list of domain prefixes.
 
-- `bacaro_subscribe(domain)`: adds the prefix, calls `zmq_setsockopt(ZMQ_SUBSCRIBE)` on every existing peer's SUB socket, and sends a snapshot request to every existing peer's DEALER socket for the new domain.
+- `bacaro_subscribe(domain)`: adds the prefix, calls `zmq_setsockopt(ZMQ_SUBSCRIBE)` on the shared SUB socket, and sends a snapshot request to every existing peer's DEALER socket for the new domain.
 - `bacaro_subscribe_all()`: calls `bacaro_subscribe("")` — an empty ZMQ subscription prefix matches everything.
-- `bacaro_unsubscribe(domain)`: removes the prefix and calls `zmq_setsockopt(ZMQ_UNSUBSCRIBE)` on all peer SUB sockets.
+- `bacaro_unsubscribe(domain)`: removes the prefix and calls `zmq_setsockopt(ZMQ_UNSUBSCRIBE)` on the shared SUB socket.
 
-When a new peer is discovered, the current `subscriptions` list is applied to its SUB socket immediately in `discovery_peer_connect`.
+Subscriptions are per-socket, not per-connection. New `zmq_connect` calls on the shared SUB socket automatically inherit existing subscription filters.
 
 ---
 
@@ -116,13 +117,14 @@ When a new peer is discovered, the current `subscriptions` list is applied to it
 
 **File:** `src/wire.h`, `src/wire.cpp`
 
-Every published message is a three-frame ZMQ multipart:
+Every published message is a four-frame ZMQ multipart (wire version 2):
 
 ```
-Frame 0 — topic   : UTF-8 path string, used as ZMQ SUB prefix filter
-Frame 1 — header  : 18 bytes, packed struct
-                    version(1) | flags(1) | sequence(8) | timestamp(8)
-Frame 2 — payload : raw MessagePack bytes
+Frame 0 — topic     : UTF-8 path string, used as ZMQ SUB prefix filter
+Frame 1 — publisher : UTF-8 publisher name (carried on the wire for shared SUB)
+Frame 2 — header    : 18 bytes, packed struct
+                      version(1) | flags(1) | sequence(8) | timestamp(8)
+Frame 3 — payload   : raw MessagePack bytes
 ```
 
 `WireHeader` is a packed struct (`#pragma pack(1)`). Sequence is a per-publisher monotonic counter; timestamp is microseconds since the Unix epoch.
@@ -157,8 +159,9 @@ Frame 1 — prefix    : domain prefix string (empty = all)
 Frame 0 — identity  : ZMQ ROUTER identity frame
 Frame 1 — flag byte : BACARO_FLAG_SNAPSHOT_REP
 Frame 2 — topic     : property path
-Frame 3 — header    : WireHeader (version, flags, sequence, timestamp)
-Frame 4 — payload   : MessagePack bytes
+Frame 3 — publisher : original publisher name
+Frame 4 — header    : WireHeader (version, flags, sequence, timestamp)
+Frame 5 — payload   : MessagePack bytes
 ```
 
 ### End marker
@@ -186,8 +189,8 @@ Snapshot requests are sent:
 |----|--------|--------|
 | `inotify_fd` | Peer arrived / left | `discovery_process_inotify` |
 | `router_fd` | Incoming snapshot request | `snapshot_handle_request` |
-| DEALER fd | Incoming snapshot reply | `snapshot_recv_one` → `apply_message` |
-| SUB fd | Live published message | `wire_recv` + `wire_unpack` → `apply_message` |
+| per-peer DEALER fd | Incoming snapshot reply | `snapshot_recv_one` → `apply_message` |
+| `sub_fd` (shared) | Live published messages from all peers | `wire_recv` + `wire_unpack` → `apply_message` |
 
 `apply_message` updates the local cache and fires the `on_update` callback if registered.
 
@@ -223,7 +226,7 @@ Each `CacheEntry` holds:
 
 ## Publisher Identity
 
-Publisher identity is inferred from the source socket, not from the wire. The `sub_fd_to_filename` map resolves a SUB socket's fd to its peer filename, from which the peer name is extracted. This avoids adding an identity frame to every published message.
+Publisher identity is carried explicitly in the wire format as frame 1 of every published message and frame 3 of every snapshot reply. This allows the use of a single shared SUB socket for all peers — since all messages arrive on the same socket, the publisher must be identified from the message itself rather than from which socket delivered it.
 
 ---
 
@@ -241,18 +244,20 @@ ZMQ PUB/SUB has a known "slow-joiner" problem: when a SUB socket connects to a P
 
 The main handle. One per process. Contains:
 - ZMQ context and bound sockets (`pub_sock`, `router_sock`)
+- `sub_sock` — shared ZMQ_SUB socket (one per process, connects to all peers)
 - `own_pub` — this process's `.pub` filename, used to ignore our own inotify events
 - `peers` map: filename → `PeerInfo`
-- `sub_fd_to_filename` / `dealer_fd_to_filename` — reverse maps for dispatch
+- `dealer_fd_to_filename` — reverse map for per-peer DEALER dispatch
 - `cache` — the local property cache
 - `sequence` — monotonic publish counter
 - `subscriptions` — list of subscribed domain prefixes
-- `inotify_fd`, `inotify_wd`, `epoll_fd`
+- `inotify_fd`, `inotify_wd`, `epoll_fd`, `sub_fd`, `router_fd`
 - `on_update_cb` / `on_update_data` — user callback
 
 ### `PeerInfo`
 
 Per-peer connection state:
-- `sub_sock` / `dealer_sock` — ZMQ sockets
+- `dealer_sock` — per-peer ZMQ DEALER socket for snapshot protocol
 - `name` — peer process name (extracted from filename)
-- `sub_fd` / `dealer_fd` — ZMQ fds registered with epoll
+- `pub_endpoint` — stored for `zmq_disconnect` on the shared SUB socket
+- `dealer_fd` — ZMQ fd registered with epoll

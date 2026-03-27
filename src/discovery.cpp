@@ -33,11 +33,9 @@ static void epoll_modify(int epoll_fd, int fd, int op)
 
 static void close_peer(bacaro_t *self, PeerInfo &peer)
 {
-    epoll_modify(self->epoll_fd, peer.sub_fd,    EPOLL_CTL_DEL);
+    zmq_disconnect(self->sub_sock, peer.pub_endpoint.c_str());
     epoll_modify(self->epoll_fd, peer.dealer_fd, EPOLL_CTL_DEL);
-    self->sub_fd_to_filename.erase(peer.sub_fd);
     self->dealer_fd_to_filename.erase(peer.dealer_fd);
-    zmq_close(peer.sub_sock);
     zmq_close(peer.dealer_sock);
 }
 
@@ -56,10 +54,10 @@ static std::string ipc_endpoint(const bacaro_t *self, const std::string &filenam
     return "ipc://" + self->runtime_dir + "/" + filename;
 }
 
-void discovery_apply_subscriptions(bacaro_t *self, void *sub_sock)
+void discovery_apply_subscriptions(bacaro_t *self)
 {
     for (const auto &sub : self->subscriptions)
-        zmq_setsockopt(sub_sock, ZMQ_SUBSCRIBE, sub.c_str(), sub.size());
+        zmq_setsockopt(self->sub_sock, ZMQ_SUBSCRIBE, sub.c_str(), sub.size());
 }
 
 int discovery_peer_connect(bacaro_t *self, const std::string &filename)
@@ -75,30 +73,21 @@ int discovery_peer_connect(bacaro_t *self, const std::string &filename)
     // Derive the .rep filename from the .pub filename
     std::string rep_filename = filename.substr(0, filename.size() - 4) + ".rep";
 
-    // ── SUB socket ───────────────────────────────────────────────────────────
-    void *sub_sock = zmq_socket(self->zmq_ctx, ZMQ_SUB);
-    if (!sub_sock)
+    // ── Shared SUB socket: just connect to the new peer's PUB ────────────
+    std::string pub_ep = ipc_endpoint(self, filename);
+    if (zmq_connect(self->sub_sock, pub_ep.c_str()) != 0)
         return BACARO_EZMQ;
 
-    if (zmq_connect(sub_sock, ipc_endpoint(self, filename).c_str()) != 0) {
-        zmq_close(sub_sock);
-        return BACARO_EZMQ;
-    }
-    discovery_apply_subscriptions(self, sub_sock);
-
-    int sub_fd = get_zmq_fd(sub_sock);
-    epoll_modify(self->epoll_fd, sub_fd, EPOLL_CTL_ADD);
-
-    // ── DEALER socket ────────────────────────────────────────────────────────
+    // ── Per-peer DEALER socket for snapshot ──────────────────────────────
     void *dealer_sock = zmq_socket(self->zmq_ctx, ZMQ_DEALER);
     if (!dealer_sock) {
-        zmq_close(sub_sock);
+        zmq_disconnect(self->sub_sock, pub_ep.c_str());
         return BACARO_EZMQ;
     }
 
     if (zmq_connect(dealer_sock, ipc_endpoint(self, rep_filename).c_str()) != 0) {
-        zmq_close(sub_sock);
         zmq_close(dealer_sock);
+        zmq_disconnect(self->sub_sock, pub_ep.c_str());
         return BACARO_EZMQ;
     }
 
@@ -106,8 +95,7 @@ int discovery_peer_connect(bacaro_t *self, const std::string &filename)
     epoll_modify(self->epoll_fd, dealer_fd, EPOLL_CTL_ADD);
 
     // Register in maps
-    self->peers[filename]              = { sub_sock, dealer_sock, peer_name, sub_fd, dealer_fd };
-    self->sub_fd_to_filename[sub_fd]   = filename;
+    self->peers[filename] = { dealer_sock, peer_name, pub_ep, dealer_fd };
     self->dealer_fd_to_filename[dealer_fd] = filename;
 
     // Send snapshot request for each subscribed domain
@@ -161,6 +149,14 @@ int discovery_init(bacaro_t *self)
     if (self->epoll_fd < 0)
         return BACARO_EZMQ;
 
+    // Create shared SUB socket
+    self->sub_sock = zmq_socket(self->zmq_ctx, ZMQ_SUB);
+    if (!self->sub_sock)
+        return BACARO_EZMQ;
+
+    self->sub_fd = get_zmq_fd(self->sub_sock);
+    epoll_modify(self->epoll_fd, self->sub_fd, EPOLL_CTL_ADD);
+
     self->inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
     if (self->inotify_fd < 0)
         return BACARO_EZMQ;
@@ -193,6 +189,12 @@ void discovery_cleanup(bacaro_t *self)
     for (auto &[filename, peer] : self->peers)
         close_peer(self, peer);
     self->peers.clear();
+
+    if (self->sub_sock) {
+        zmq_close(self->sub_sock);
+        self->sub_sock = nullptr;
+        self->sub_fd = -1;
+    }
 
     if (self->inotify_fd >= 0) {
         close(self->inotify_fd);

@@ -10,11 +10,10 @@ int discovery_init(bacaro_t *self);
 // Called from bacaro_destroy().
 void discovery_cleanup(bacaro_t *self);
 
-// Apply all current subscriptions to a single SUB socket.
-// Called when a new peer is connected or a new subscription is added.
-void discovery_apply_subscriptions(bacaro_t *self, void *sub_sock);
+// Apply all current subscriptions to the shared SUB socket.
+void discovery_apply_subscriptions(bacaro_t *self);
 
-// Connect a SUB socket to a peer's PUB file (filename only, not full path).
+// Connect to a peer's PUB file (filename only, not full path).
 // No-op if already connected.
 int discovery_peer_connect(bacaro_t *self, const std::string &filename);
 

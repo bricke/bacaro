@@ -67,17 +67,17 @@ TEST_CASE("mid-life subscribe triggers snapshot for new domain")
     // Beta subscribes to sensors first
     bacaro_subscribe(beta, "sensors");
 
-    // Let them discover each other
-    usleep(20000);
-    bacaro_dispatch(alpha);
-    bacaro_dispatch(beta);
+    // Wait for discovery + initial snapshot to complete
+    bool sensors_ok = pump(alpha, beta, [&]() {
+        return beta->cache.get("sensors.temp") != nullptr;
+    });
+    REQUIRE(sensors_ok);
 
     // Beta now subscribes to network mid-life
     bacaro_subscribe(beta, "network");
 
     bool ok = pump(alpha, beta, [&]() {
-        return beta->cache.get("network.eth0.rx") != nullptr
-            && beta->cache.get("sensors.temp")    != nullptr;
+        return beta->cache.get("network.eth0.rx") != nullptr;
     });
 
     CHECK(ok);

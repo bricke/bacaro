@@ -68,23 +68,23 @@ Bacaro does not enforce a maximum property value size. Very large MessagePack pa
 
 ## Scalability: process count vs. file descriptor usage
 
-Bacaro is a fully connected mesh — every process holds two ZMQ sockets per peer (SUB + DEALER). ZMQ uses approximately 3 file descriptors per socket internally. Per-process fd cost is roughly `6N`, where N is the total number of processes.
+Bacaro uses a **shared SUB socket** for live updates (one socket, O(1) fds regardless of peer count) and **per-peer DEALER sockets** for the snapshot protocol. Per-process fd cost is roughly `3N + 15`, where N is the total number of processes (dominated by per-peer DEALER sockets and their internal ZMQ fds).
 
 **Per-process fd usage and system-wide total:**
 
 | Processes (N) | fds per process | System-wide fds | Assessment |
 |---------------|----------------|-----------------|------------|
-| 10  | ~60   | ~600    | No tuning needed |
-| 50  | ~300  | ~15,000 | No tuning needed |
-| 100 | ~600  | ~60,000 | Comfortable, ulimit tuning recommended |
-| 150 | ~900  | ~135,000 | Approaching default `ulimit -n 1024` per process |
-| 200 | ~1,200 | ~240,000 | Exceeds default per-process limit — requires `ulimit -n 4096` |
-| 300 | ~1,800 | ~540,000 | Possible with tuning; snapshot join latency becomes significant |
-| 500+ | ~3,000 | ~1,500,000 | O(N²) mesh is the architectural bottleneck — consider a broker |
+| 10  | ~45   | ~450    | No tuning needed |
+| 50  | ~165  | ~8,250  | No tuning needed |
+| 100 | ~315  | ~31,500 | No tuning needed |
+| 200 | ~615  | ~123,000 | Comfortable, ulimit tuning recommended |
+| 300 | ~915  | ~274,500 | Approaching default `ulimit -n 1024` per process |
+| 500 | ~1,515 | ~757,500 | Requires `ulimit -n 4096` |
+| 700+ | ~2,115 | ~1,480,000 | Consider a broker or hierarchy |
 
-**Sweet spot:** 50–100 processes. Bacaro performs well with zero tuning in this range, which covers typical single-machine topologies (system daemons, per-subsystem services).
+**Sweet spot:** 50–200 processes. Bacaro performs well with zero tuning in this range.
 
 **Additional constraints at high N:**
 - **Snapshot storm on join:** a new process fires N-1 snapshot requests simultaneously; join latency grows as O(N × cache size).
-- **Memory:** ~75KB per ZMQ socket × 2(N-1) sockets ≈ 30MB per process at N=200.
-- **ulimit:** raise `ulimit -n` (or set in `/etc/security/limits.conf`) before crossing ~150 processes.
+- **Memory:** ~75KB per ZMQ socket × (N-1) DEALER sockets ≈ 15MB per process at N=200.
+- **ulimit:** raise `ulimit -n` (or set in `/etc/security/limits.conf`) before crossing ~300 processes.

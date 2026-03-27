@@ -44,21 +44,20 @@ static int bind_ipc(void *sock, const std::string &path)
     return zmq_bind(sock, endpoint.c_str()) == 0 ? BACARO_OK : BACARO_EZMQ;
 }
 
-static void apply_message(bacaro_t *self, const WireMessage &msg, const std::string &peer_name)
+static void apply_message(bacaro_t *self, const WireMessage &msg)
 {
-    self->cache.set(msg.topic, msg.payload, peer_name, msg.header.sequence, msg.header.timestamp);
+    self->cache.set(msg.topic, msg.payload, msg.publisher, msg.header.sequence, msg.header.timestamp);
     if (self->on_update_cb)
         self->on_update_cb(self, msg.topic.c_str(),
                            msg.payload.data(), msg.payload.size(),
                            self->on_update_data);
 }
 
-// Look up a peer by ZMQ fd using the given fd→filename reverse map
-static PeerInfo *find_peer(bacaro_t *self,
-                           const std::unordered_map<int, std::string> &fd_map, int fd)
+// Look up a peer by DEALER fd
+static PeerInfo *find_peer(bacaro_t *self, int fd)
 {
-    auto fit = fd_map.find(fd);
-    if (fit == fd_map.end()) return nullptr;
+    auto fit = self->dealer_fd_to_filename.find(fd);
+    if (fit == self->dealer_fd_to_filename.end()) return nullptr;
     auto pit = self->peers.find(fit->second);
     return pit != self->peers.end() ? &pit->second : nullptr;
 }
@@ -179,10 +178,12 @@ int bacaro_subscribe(bacaro_t *self, const char *domain)
 
     self->subscriptions.push_back(prefix);
 
-    for (auto &[filename, peer] : self->peers) {
-        zmq_setsockopt(peer.sub_sock, ZMQ_SUBSCRIBE, prefix.c_str(), prefix.size());
+    // Apply to the shared SUB socket (covers all connected peers)
+    zmq_setsockopt(self->sub_sock, ZMQ_SUBSCRIBE, prefix.c_str(), prefix.size());
+
+    // Request snapshot from each peer's DEALER socket
+    for (auto &[filename, peer] : self->peers)
         snapshot_send_request(peer.dealer_sock, prefix);
-    }
 
     return BACARO_OK;
 }
@@ -201,8 +202,7 @@ int bacaro_unsubscribe(bacaro_t *self, const char *domain)
     auto &subs = self->subscriptions;
     subs.erase(std::remove(subs.begin(), subs.end(), prefix), subs.end());
 
-    for (auto &[filename, peer] : self->peers)
-        zmq_setsockopt(peer.sub_sock, ZMQ_UNSUBSCRIBE, prefix.c_str(), prefix.size());
+    zmq_setsockopt(self->sub_sock, ZMQ_UNSUBSCRIBE, prefix.c_str(), prefix.size());
 
     return BACARO_OK;
 }
@@ -224,9 +224,10 @@ int bacaro_set(bacaro_t *self, const char *path,
 
     // Broadcast to all subscribers
     WireMessage msg;
-    msg.topic   = path;
-    msg.header  = { BACARO_WIRE_VERSION, BACARO_FLAG_NONE, seq, ts };
-    msg.payload = std::move(payload);
+    msg.topic     = path;
+    msg.publisher = self->name;
+    msg.header    = { BACARO_WIRE_VERSION, BACARO_FLAG_NONE, seq, ts };
+    msg.payload   = std::move(payload);
 
     return wire_send(self->pub_sock, wire_pack(msg));
 }
@@ -293,27 +294,27 @@ int bacaro_dispatch(bacaro_t *self)
         }
 
         // ── DEALER: incoming snapshot reply ──────────────────────────────
-        if (auto *peer = find_peer(self, self->dealer_fd_to_filename, fd)) {
+        if (auto *peer = find_peer(self, fd)) {
             drain_zmq(peer->dealer_sock, [&](void *sock) {
                 WireMessage msg;
                 bool is_end = false;
                 if (snapshot_recv_one(sock, msg, is_end) != BACARO_OK || is_end)
                     return;
-                apply_message(self, msg, peer->name);
+                apply_message(self, msg);
             });
             continue;
         }
 
-        // ── SUB: live published message from a peer ───────────────────────
-        if (auto *peer = find_peer(self, self->sub_fd_to_filename, fd)) {
-            drain_zmq(peer->sub_sock, [&](void *sock) {
+        // ── Shared SUB: live published messages from all peers ───────────
+        if (fd == self->sub_fd) {
+            drain_zmq(self->sub_sock, [&](void *sock) {
                 Frames frames;
                 if (wire_recv(sock, frames) != BACARO_OK)
                     return;
                 WireMessage msg;
                 if (wire_unpack(frames, msg) != BACARO_OK)
                     return;
-                apply_message(self, msg, peer->name);
+                apply_message(self, msg);
             });
         }
     }
