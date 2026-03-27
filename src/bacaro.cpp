@@ -6,6 +6,7 @@
 #include <sys/epoll.h>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <random>
 #include <sstream>
@@ -77,7 +78,18 @@ static void drain_zmq(void *sock, const std::function<void(void *)> &handler)
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-bacaro_t *bacaro_new(const char *name)
+static void write_manifest(bacaro_t *self, const char **published_domains)
+{
+    if (!published_domains)
+        return;
+
+    std::string path = ipc_path(self, ".manifest");
+    std::ofstream out(path);
+    for (const char **p = published_domains; *p; ++p)
+        out << *p << '\n';
+}
+
+bacaro_t *bacaro_new(const char *name, const char **published_domains)
 {
     if (!name || name[0] == '\0')
         return nullptr;
@@ -95,6 +107,9 @@ bacaro_t *bacaro_new(const char *name)
     fs::create_directories(self->runtime_dir, ec);
     if (ec)
         goto fail;
+
+    // Write manifest before discovery so peers see it when they find our .pub
+    write_manifest(self, published_domains);
 
     self->zmq_ctx = zmq_ctx_new();
     if (!self->zmq_ctx)
@@ -155,6 +170,9 @@ void bacaro_destroy(bacaro_t **self_ptr)
     close_and_remove(self->pub_sock,    ".pub");
     close_and_remove(self->router_sock, ".rep");
 
+    // Remove manifest file if it exists
+    { std::error_code ec; fs::remove(ipc_path(self, ".manifest"), ec); }
+
     if (self->zmq_ctx) {
         zmq_ctx_destroy(self->zmq_ctx);
         self->zmq_ctx = nullptr;
@@ -181,8 +199,11 @@ int bacaro_subscribe(bacaro_t *self, const char *domain)
     // Apply to the shared SUB socket (covers all connected peers)
     zmq_setsockopt(self->sub_sock, ZMQ_SUBSCRIBE, prefix.c_str(), prefix.size());
 
-    // Ensure each peer has a DEALER socket and request snapshot
+    // Ensure each peer has a DEALER socket and request snapshot.
+    // Skip peers whose manifest doesn't overlap with this subscription.
     for (auto &[filename, peer] : self->peers) {
+        if (!manifest_overlaps(peer, prefix))
+            continue;
         if (discovery_ensure_dealer(self, filename, peer) == BACARO_OK)
             snapshot_send_request(peer.dealer_sock, prefix);
     }

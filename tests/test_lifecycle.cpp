@@ -31,7 +31,7 @@ static int count_ipc_files(const std::string &prefix, const std::string &suffix)
 
 TEST_CASE("bacaro_new creates IPC files")
 {
-    bacaro_t *n = bacaro_new("testproc");
+    bacaro_t *n = bacaro_new("testproc", nullptr);
     REQUIRE(n != nullptr);
 
     CHECK(count_ipc_files("testproc.", ".pub") == 1);
@@ -42,7 +42,7 @@ TEST_CASE("bacaro_new creates IPC files")
 
 TEST_CASE("bacaro_destroy removes IPC files and nulls pointer")
 {
-    bacaro_t *n = bacaro_new("testproc");
+    bacaro_t *n = bacaro_new("testproc", nullptr);
     REQUIRE(n != nullptr);
 
     bacaro_destroy(&n);
@@ -60,14 +60,14 @@ TEST_CASE("bacaro_destroy is safe to call on null")
 
 TEST_CASE("bacaro_new rejects null or empty name")
 {
-    CHECK(bacaro_new(nullptr) == nullptr);
-    CHECK(bacaro_new("")      == nullptr);
+    CHECK(bacaro_new(nullptr, nullptr) == nullptr);
+    CHECK(bacaro_new("", nullptr)      == nullptr);
 }
 
 TEST_CASE("two instances with different names coexist")
 {
-    bacaro_t *a = bacaro_new("proc_a");
-    bacaro_t *b = bacaro_new("proc_b");
+    bacaro_t *a = bacaro_new("proc_a", nullptr);
+    bacaro_t *b = bacaro_new("proc_b", nullptr);
     REQUIRE(a != nullptr);
     REQUIRE(b != nullptr);
 
@@ -85,7 +85,7 @@ TEST_CASE("BACARO_RUNTIME_DIR env variable is respected")
 {
     setenv("BACARO_RUNTIME_DIR", "/tmp/bacaro_test_custom", 1);
 
-    bacaro_t *n = bacaro_new("envtest");
+    bacaro_t *n = bacaro_new("envtest", nullptr);
     REQUIRE(n != nullptr);
 
     CHECK(fs::exists("/tmp/bacaro_test_custom"));

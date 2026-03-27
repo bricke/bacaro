@@ -21,7 +21,26 @@ struct PeerInfo {
     std::string  pub_endpoint;          // "ipc://..." for zmq_disconnect on the shared SUB
     std::string  rep_endpoint;          // "ipc://..." for lazy DEALER connect
     int          dealer_fd   = -1;      // ZMQ_FD of dealer_sock (epoll)
+    std::vector<std::string> manifest;  // declared published domains (empty if no manifest)
+    bool has_manifest = false;          // true if peer had a .manifest file at discovery time
 };
+
+// Check if a subscription prefix overlaps with a peer's manifest.
+// Returns true if the peer has no manifest or if any declared domain matches.
+static inline bool manifest_overlaps(const PeerInfo &peer, const std::string &prefix)
+{
+    if (!peer.has_manifest)
+        return true;
+    for (const auto &domain : peer.manifest) {
+        if (prefix.empty() || domain == prefix
+            || (domain.size() > prefix.size() && domain[prefix.size()] == '.'
+                && domain.compare(0, prefix.size(), prefix) == 0)
+            || (prefix.size() > domain.size() && prefix[domain.size()] == '.'
+                && prefix.compare(0, domain.size(), domain) == 0))
+            return true;
+    }
+    return false;
+}
 
 struct bacaro_s {
     std::string name;

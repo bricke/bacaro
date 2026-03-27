@@ -91,7 +91,7 @@ int main(int argc, char **argv)
     const char *path  = argv[argi];
     const char *value = argv[argi + 1];
 
-    bacaro_t *b = bacaro_new("vecio");
+    bacaro_t *b = bacaro_new("vecio", nullptr);
     if (!b) {
         fprintf(stderr, "vecio: failed to initialise bacaro\n");
         return 1;

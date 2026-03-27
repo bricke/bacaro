@@ -108,7 +108,8 @@ typedef void (*bacaro_fn)(bacaro_t *self, const char *path,
 #include <msgpack.hpp>
 
 // Publisher
-bacaro_t *pub = bacaro_new("powerd");
+const char *domains[] = {"system", "power", nullptr};
+bacaro_t *pub = bacaro_new("powerd", domains);
 
 msgpack::sbuffer buf;
 msgpack::pack(buf, 87.3);
@@ -124,7 +125,7 @@ static void on_update(bacaro_t *self, const char *path,
     // called on every received update
 }
 
-bacaro_t *sub = bacaro_new("monitor");
+bacaro_t *sub = bacaro_new("monitor", nullptr);
 bacaro_subscribe(sub, "system");
 bacaro_on_update(sub, on_update, NULL);
 

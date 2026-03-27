@@ -56,7 +56,7 @@ int main()
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
 
-    bacaro_t *b = bacaro_new("oste");
+    bacaro_t *b = bacaro_new("oste", nullptr);
     if (!b) {
         fprintf(stderr, "oste: failed to initialise bacaro\n");
         return 1;

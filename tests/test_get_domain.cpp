@@ -24,7 +24,7 @@ static std::set<std::string> proplist_paths(const bacaro_proplist_t *list)
 TEST_CASE("bacaro_get_domain rejects null arguments")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     CHECK(bacaro_get_domain(nullptr, "sensors") == nullptr);
@@ -43,7 +43,7 @@ TEST_CASE("bacaro_proplist_destroy is safe on null")
 TEST_CASE("proplist accessors return safe defaults on out-of-bounds index")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     bacaro_proplist_t *list = bacaro_get_domain(a, "sensors");
@@ -73,7 +73,7 @@ TEST_CASE("proplist accessors return safe defaults on out-of-bounds index")
 TEST_CASE("bacaro_get_domain returns empty list for unknown domain")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     bacaro_proplist_t *list = bacaro_get_domain(a, "bluetooth");
@@ -90,7 +90,7 @@ TEST_CASE("bacaro_get_domain returns empty list for unknown domain")
 TEST_CASE("bacaro_get_domain returns all matching properties")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v = pack_float(1.0);
@@ -141,7 +141,7 @@ TEST_CASE("bacaro_get_domain returns all matching properties")
 TEST_CASE("bacaro_proplist_value returns correct data")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v = pack_float(72.5);
@@ -163,7 +163,7 @@ TEST_CASE("bacaro_proplist_value returns correct data")
 TEST_CASE("bacaro_proplist_publisher returns correct publisher")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("powerd");
+    bacaro_t *a = bacaro_new("powerd", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v = pack_float(1.0);
@@ -182,7 +182,7 @@ TEST_CASE("bacaro_proplist_publisher returns correct publisher")
 TEST_CASE("bacaro_proplist_sequence and timestamp are populated")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v = pack_float(1.0);
@@ -209,7 +209,7 @@ TEST_CASE("bacaro_proplist_sequence and timestamp are populated")
 TEST_CASE("bacaro_get_domain does not match partial segment names")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v = pack_float(1.0);
@@ -232,8 +232,8 @@ TEST_CASE("bacaro_get_domain returns properties received from remote publisher")
 {
     Fixture f(TEST_DIR);
 
-    bacaro_t *pub = bacaro_new("publisher");
-    bacaro_t *sub = bacaro_new("subscriber");
+    bacaro_t *pub = bacaro_new("publisher", nullptr);
+    bacaro_t *sub = bacaro_new("subscriber", nullptr);
     REQUIRE(pub != nullptr);
     REQUIRE(sub != nullptr);
 
