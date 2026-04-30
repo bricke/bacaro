@@ -29,9 +29,10 @@ Each process uses a **single shared SUB socket** that connects to every peer's P
 1. Generate a UUID for this instance.
 2. Resolve the runtime directory (`BACARO_RUNTIME_DIR`, default `/tmp/bacaro`).
 3. Create the runtime directory if it does not exist.
-4. Bind a `ZMQ_PUB` socket → IPC file `<name>.<uuid>.pub`
-5. Bind a `ZMQ_ROUTER` socket → IPC file `<name>.<uuid>.rep`
-6. Call `discovery_init` (see Discovery below).
+4. If `published_domains` is non-NULL, write a `.manifest` file (`<name>.<uuid>.manifest`) listing one domain per line — written **before** discovery so peers see it when they find the `.pub` file.
+5. Bind a `ZMQ_PUB` socket → IPC file `<name>.<uuid>.pub`
+6. Bind a `ZMQ_ROUTER` socket → IPC file `<name>.<uuid>.rep`
+7. Call `discovery_init` (see Discovery below).
 
 The UUID in the filename prevents collisions when a process restarts quickly under the same name.
 
@@ -39,7 +40,7 @@ The UUID in the filename prevents collisions when a process restarts quickly und
 
 1. `discovery_cleanup`: disconnect all peers, close epoll and inotify fds.
 2. Set `ZMQ_LINGER = 200ms` on the PUB socket before closing, so any recently published messages have time to flush to connected peers (see [Slow-Joiner Note](#slow-joiner-note)).
-3. Close and remove the `.pub` and `.rep` IPC files.
+3. Close and remove the `.pub`, `.rep`, and `.manifest` IPC files.
 4. Destroy the ZMQ context.
 
 ---
@@ -69,10 +70,9 @@ Triggered by a new `.pub` file appearing (either from the initial scan or from a
 1. Extract the peer name from the filename (everything before the first `.`).
 2. Derive the `.rep` filename by replacing the `.pub` suffix.
 3. Call `zmq_connect` on the **shared SUB socket** to the peer's PUB endpoint.
-4. Create a per-peer `ZMQ_DEALER` socket, connect to `ipc://<runtime_dir>/<rep_filename>`.
-5. Register the DEALER socket's ZMQ fd with epoll.
-6. Record the peer in `peers` and `dealer_fd_to_filename` maps. Store the PUB endpoint string for later `zmq_disconnect`.
-7. Send a snapshot request for each currently subscribed domain prefix.
+4. Read the peer's `.manifest` file if present; store declared domains and `has_manifest` flag in `PeerInfo`.
+5. Record the peer in the `peers` map, storing both the PUB and REP endpoints.
+6. **Lazy DEALER**: if the process has active subscriptions, iterate them. For each prefix that overlaps with the peer's manifest (or if the peer has no manifest), create a per-peer `ZMQ_DEALER` socket, connect to the REP endpoint, register its fd with epoll, and send a snapshot request. Peers with a manifest that doesn't overlap any active subscription get no DEALER socket at all.
 
 ### Peer disconnect (`discovery_peer_disconnect`)
 
@@ -257,7 +257,10 @@ The main handle. One per process. Contains:
 ### `PeerInfo`
 
 Per-peer connection state:
-- `dealer_sock` — per-peer ZMQ DEALER socket for snapshot protocol
+- `dealer_sock` — per-peer ZMQ DEALER socket for snapshot protocol (created lazily, may be `nullptr`)
 - `name` — peer process name (extracted from filename)
 - `pub_endpoint` — stored for `zmq_disconnect` on the shared SUB socket
-- `dealer_fd` — ZMQ fd registered with epoll
+- `rep_endpoint` — stored for lazy DEALER connect
+- `dealer_fd` — ZMQ fd registered with epoll (`-1` until DEALER is created)
+- `manifest` — declared published domains read from the peer's `.manifest` file
+- `has_manifest` — `true` if a `.manifest` file was found at discovery time

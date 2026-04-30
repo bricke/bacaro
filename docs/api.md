@@ -5,13 +5,24 @@ The full public API is declared in [`include/bacaro.h`](../include/bacaro.h).
 ## Lifecycle
 
 ```c
-bacaro_t *bacaro_new    (const char *name);
+bacaro_t *bacaro_new    (const char *name, const char **published_domains);
 void      bacaro_destroy(bacaro_t **self);
 ```
 
 `bacaro_new` creates a new instance with the given process name, binds its sockets, and starts peer discovery. Returns `NULL` on failure.
 
-`bacaro_destroy` disconnects all peers, removes IPC files, and frees all resources. Sets `*self` to `NULL`.
+`published_domains` is an optional NULL-terminated array of domain strings that this process will publish. When provided, a `.manifest` file is written alongside the `.pub` and `.rep` files so that peers can skip snapshot requests for non-overlapping domains. Pass `NULL` if you don't want to declare a manifest — the bus works identically without one.
+
+```c
+// Declare published domains (optional optimisation)
+const char *domains[] = {"sensors", "power", NULL};
+bacaro_t *b = bacaro_new("powerd", domains);
+
+// No manifest — backwards compatible
+bacaro_t *b = bacaro_new("monitor", NULL);
+```
+
+`bacaro_destroy` disconnects all peers, removes IPC files (including the `.manifest` if one was written), and frees all resources. Sets `*self` to `NULL`.
 
 ## Subscriptions
 
