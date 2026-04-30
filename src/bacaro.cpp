@@ -181,9 +181,11 @@ int bacaro_subscribe(bacaro_t *self, const char *domain)
     // Apply to the shared SUB socket (covers all connected peers)
     zmq_setsockopt(self->sub_sock, ZMQ_SUBSCRIBE, prefix.c_str(), prefix.size());
 
-    // Request snapshot from each peer's DEALER socket
-    for (auto &[filename, peer] : self->peers)
-        snapshot_send_request(peer.dealer_sock, prefix);
+    // Ensure each peer has a DEALER socket and request snapshot
+    for (auto &[filename, peer] : self->peers) {
+        if (discovery_ensure_dealer(self, filename, peer) == BACARO_OK)
+            snapshot_send_request(peer.dealer_sock, prefix);
+    }
 
     return BACARO_OK;
 }
