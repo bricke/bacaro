@@ -139,23 +139,17 @@ int discovery_peer_connect(bacaro_t *self, const std::string &filename)
     // ── Lazy DEALER: only create if subscriptions overlap with manifest ─
     if (!self->subscriptions.empty()) {
         auto &peer = self->peers[filename];
-        bool needs_dealer = false;
         for (const auto &prefix : self->subscriptions) {
-            if (manifest_overlaps(peer, prefix)) {
-                needs_dealer = true;
-                break;
+            if (!manifest_overlaps(peer, prefix))
+                continue;
+            if (!peer.dealer_sock) {
+                if (discovery_ensure_dealer(self, filename, peer) != BACARO_OK) {
+                    zmq_disconnect(self->sub_sock, pub_ep.c_str());
+                    self->peers.erase(filename);
+                    return BACARO_EZMQ;
+                }
             }
-        }
-
-        if (needs_dealer) {
-            if (discovery_ensure_dealer(self, filename, peer) != BACARO_OK) {
-                zmq_disconnect(self->sub_sock, pub_ep.c_str());
-                self->peers.erase(filename);
-                return BACARO_EZMQ;
-            }
-
-            for (const auto &prefix : self->subscriptions)
-                snapshot_send_request(peer.dealer_sock, prefix);
+            snapshot_send_request(peer.dealer_sock, prefix);
         }
     }
 
