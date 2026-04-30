@@ -48,6 +48,54 @@ vecio -w 500 sensors.cpu.temperature 71.3
 
 ---
 
+## bacaro_get returns BACARO_ENOTFOUND immediately after join
+
+**Symptom:** A process calls `bacaro_get` right after `bacaro_new` (or right after `bacaro_subscribe`) and gets `BACARO_ENOTFOUND`, even though the property exists on the bus.
+
+**Cause:** `bacaro_get` is a pure local cache lookup — it never blocks or waits on the network. The snapshot replies from peers are ZMQ messages sitting in a socket buffer; they do not enter the cache until `bacaro_dispatch` is called. Two things must happen before `bacaro_get` returns a value:
+
+1. A snapshot has been requested (requires `bacaro_subscribe`)
+2. The snapshot reply has been processed (requires one or more `bacaro_dispatch` calls)
+
+Simply calling `bacaro_new` is not enough — at creation time there are no subscriptions, so no snapshot is requested and the cache stays empty.
+
+**Fix:** Pump the event loop until the property arrives. Two approaches:
+
+**Option 1 — polling loop with sleep.** Simple and portable. The `usleep` prevents spinning at 100% CPU between dispatch calls. Choose the sleep duration based on acceptable latency:
+
+```c
+bacaro_t *b = bacaro_new("monitor", NULL);
+bacaro_subscribe(b, "sensors");
+
+const uint8_t *out; size_t len;
+while (bacaro_get(b, "sensors.temp", &out, &len) == BACARO_ENOTFOUND) {
+    bacaro_dispatch(b);
+    usleep(1000); // 1ms sleep — tune to taste
+}
+```
+
+**Option 2 — `poll` on the bacaro fd.** More efficient: the process sleeps in the kernel until there is actual bus activity, then wakes up and dispatches. Avoids both busy-spinning and fixed-interval sleeping:
+
+```c
+#include <poll.h>
+
+bacaro_t *b = bacaro_new("monitor", NULL);
+bacaro_subscribe(b, "sensors");
+
+const uint8_t *out; size_t len;
+struct pollfd pfd = { bacaro_fd(b), POLLIN, 0 };
+while (bacaro_get(b, "sensors.temp", &out, &len) == BACARO_ENOTFOUND) {
+    poll(&pfd, 1, 100); // sleep until activity, or at most 100ms
+    bacaro_dispatch(b);
+}
+```
+
+In both cases, if the property may never exist, add an iteration cap or a deadline check to avoid an infinite loop.
+
+**Note:** `bacaro_get` never returns invalid or garbage data — only `BACARO_OK` (value present) or `BACARO_ENOTFOUND` (not yet cached).
+
+---
+
 ## Two processes with the same name
 
 Each Bacaro instance generates a UUID at startup appended to its IPC filename (`<name>.<uuid>.pub`). Two processes with the same name are treated as separate peers — they will both publish and both be discovered. Properties published by either will coexist in the cache, with last-write-wins applying per path.
