@@ -59,7 +59,9 @@ vecio -w 500 sensors.cpu.temperature 71.3
 
 Simply calling `bacaro_new` is not enough — at creation time there are no subscriptions, so no snapshot is requested and the cache stays empty.
 
-**Fix:** Pump the event loop until the property arrives:
+**Fix:** Pump the event loop until the property arrives. Two approaches:
+
+**Option 1 — polling loop with sleep.** Simple and portable. The `usleep` prevents spinning at 100% CPU between dispatch calls. Choose the sleep duration based on acceptable latency:
 
 ```c
 bacaro_t *b = bacaro_new("monitor", NULL);
@@ -68,11 +70,27 @@ bacaro_subscribe(b, "sensors");
 const uint8_t *out; size_t len;
 while (bacaro_get(b, "sensors.temp", &out, &len) == BACARO_ENOTFOUND) {
     bacaro_dispatch(b);
-    usleep(1000);
+    usleep(1000); // 1ms sleep — tune to taste
 }
 ```
 
-If the property may never exist, add a timeout or iteration cap to avoid an infinite loop.
+**Option 2 — `poll` on the bacaro fd.** More efficient: the process sleeps in the kernel until there is actual bus activity, then wakes up and dispatches. Avoids both busy-spinning and fixed-interval sleeping:
+
+```c
+#include <poll.h>
+
+bacaro_t *b = bacaro_new("monitor", NULL);
+bacaro_subscribe(b, "sensors");
+
+const uint8_t *out; size_t len;
+struct pollfd pfd = { bacaro_fd(b), POLLIN, 0 };
+while (bacaro_get(b, "sensors.temp", &out, &len) == BACARO_ENOTFOUND) {
+    poll(&pfd, 1, 100); // sleep until activity, or at most 100ms
+    bacaro_dispatch(b);
+}
+```
+
+In both cases, if the property may never exist, add an iteration cap or a deadline check to avoid an infinite loop.
 
 **Note:** `bacaro_get` never returns invalid or garbage data — only `BACARO_OK` (value present) or `BACARO_ENOTFOUND` (not yet cached).
 
