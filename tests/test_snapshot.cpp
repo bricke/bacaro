@@ -15,7 +15,7 @@ TEST_CASE("late joiner receives snapshot of existing properties")
     Fixture f(TEST_DIR);
 
     // Alpha starts, seeds its own cache and subscribes
-    bacaro_t *alpha = bacaro_new("alpha");
+    bacaro_t *alpha = bacaro_new("alpha", nullptr);
     REQUIRE(alpha != nullptr);
 
     bacaro_subscribe(alpha, "sensors");
@@ -26,7 +26,7 @@ TEST_CASE("late joiner receives snapshot of existing properties")
     alpha->cache.set("network.eth0.rx",   pack_float(1024.), "alpha", 3, 3000);
 
     // Beta joins late and subscribes to "sensors"
-    bacaro_t *beta = bacaro_new("beta");
+    bacaro_t *beta = bacaro_new("beta", nullptr);
     REQUIRE(beta != nullptr);
 
     bacaro_subscribe(beta, "sensors");
@@ -55,8 +55,8 @@ TEST_CASE("mid-life subscribe triggers snapshot for new domain")
 {
     Fixture f(TEST_DIR);
 
-    bacaro_t *alpha = bacaro_new("alpha");
-    bacaro_t *beta  = bacaro_new("beta");
+    bacaro_t *alpha = bacaro_new("alpha", nullptr);
+    bacaro_t *beta  = bacaro_new("beta", nullptr);
     REQUIRE(alpha != nullptr);
     REQUIRE(beta  != nullptr);
 
@@ -92,8 +92,8 @@ TEST_CASE("subscribe_all receives full snapshot")
 {
     Fixture f(TEST_DIR);
 
-    bacaro_t *alpha = bacaro_new("alpha");
-    bacaro_t *beta  = bacaro_new("beta");
+    bacaro_t *alpha = bacaro_new("alpha", nullptr);
+    bacaro_t *beta  = bacaro_new("beta", nullptr);
     REQUIRE(alpha != nullptr);
     REQUIRE(beta  != nullptr);
 

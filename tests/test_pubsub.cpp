@@ -16,7 +16,7 @@ static const char *TEST_DIR = "/tmp/bacaro_test_pubsub";
 TEST_CASE("bacaro_set returns BACARO_OK")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v = pack_float(42.0);
@@ -28,7 +28,7 @@ TEST_CASE("bacaro_set returns BACARO_OK")
 TEST_CASE("bacaro_set rejects null arguments")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v = pack_float(1.0);
@@ -42,7 +42,7 @@ TEST_CASE("bacaro_set rejects null arguments")
 TEST_CASE("bacaro_set immediately updates local cache")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v = pack_float(55.5);
@@ -58,7 +58,7 @@ TEST_CASE("bacaro_set immediately updates local cache")
 TEST_CASE("bacaro_set stores self as publisher")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("powerd");
+    bacaro_t *a = bacaro_new("powerd", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v = pack_int(100);
@@ -74,7 +74,7 @@ TEST_CASE("bacaro_set stores self as publisher")
 TEST_CASE("bacaro_set increments sequence counter")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v = pack_int(1);
@@ -92,7 +92,7 @@ TEST_CASE("bacaro_set increments sequence counter")
 TEST_CASE("bacaro_set last-write-wins on same path")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     Frame v1 = pack_float(10.0);
@@ -110,7 +110,7 @@ TEST_CASE("bacaro_set last-write-wins on same path")
 TEST_CASE("bacaro_set supports various msgpack types")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     // integer
@@ -152,7 +152,7 @@ TEST_CASE("bacaro_set supports various msgpack types")
 TEST_CASE("bacaro_get returns BACARO_ENOTFOUND for unknown path")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     const uint8_t *out; size_t len;
@@ -164,7 +164,7 @@ TEST_CASE("bacaro_get returns BACARO_ENOTFOUND for unknown path")
 TEST_CASE("bacaro_get rejects null arguments")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     const uint8_t *out; size_t len;
@@ -181,7 +181,7 @@ TEST_CASE("bacaro_get rejects null arguments")
 TEST_CASE("bacaro_get_publisher returns null for unknown path")
 {
     Fixture f(TEST_DIR);
-    bacaro_t *a = bacaro_new("alpha");
+    bacaro_t *a = bacaro_new("alpha", nullptr);
     REQUIRE(a != nullptr);
 
     CHECK(bacaro_get_publisher(a, "unknown.path") == nullptr);
@@ -197,8 +197,8 @@ TEST_CASE("subscriber receives published message via dispatch")
 {
     Fixture f(TEST_DIR);
 
-    bacaro_t *pub = bacaro_new("publisher");
-    bacaro_t *sub = bacaro_new("subscriber");
+    bacaro_t *pub = bacaro_new("publisher", nullptr);
+    bacaro_t *sub = bacaro_new("subscriber", nullptr);
     REQUIRE(pub != nullptr);
     REQUIRE(sub != nullptr);
 
@@ -235,8 +235,8 @@ TEST_CASE("subscriber does not receive messages outside subscribed domain")
 {
     Fixture f(TEST_DIR);
 
-    bacaro_t *pub = bacaro_new("publisher");
-    bacaro_t *sub = bacaro_new("subscriber");
+    bacaro_t *pub = bacaro_new("publisher", nullptr);
+    bacaro_t *sub = bacaro_new("subscriber", nullptr);
     REQUIRE(pub != nullptr);
     REQUIRE(sub != nullptr);
 
@@ -266,8 +266,8 @@ TEST_CASE("subscribe_all receives all published messages")
 {
     Fixture f(TEST_DIR);
 
-    bacaro_t *pub = bacaro_new("publisher");
-    bacaro_t *sub = bacaro_new("subscriber");
+    bacaro_t *pub = bacaro_new("publisher", nullptr);
+    bacaro_t *sub = bacaro_new("subscriber", nullptr);
     REQUIRE(pub != nullptr);
     REQUIRE(sub != nullptr);
 
@@ -298,8 +298,8 @@ TEST_CASE("on_update callback fires on received message")
 {
     Fixture f(TEST_DIR);
 
-    bacaro_t *pub = bacaro_new("publisher");
-    bacaro_t *sub = bacaro_new("subscriber");
+    bacaro_t *pub = bacaro_new("publisher", nullptr);
+    bacaro_t *sub = bacaro_new("subscriber", nullptr);
     REQUIRE(pub != nullptr);
     REQUIRE(sub != nullptr);
 
@@ -333,8 +333,8 @@ TEST_CASE("unsubscribe stops receiving messages for that domain")
 {
     Fixture f(TEST_DIR);
 
-    bacaro_t *pub = bacaro_new("publisher");
-    bacaro_t *sub = bacaro_new("subscriber");
+    bacaro_t *pub = bacaro_new("publisher", nullptr);
+    bacaro_t *sub = bacaro_new("subscriber", nullptr);
     REQUIRE(pub != nullptr);
     REQUIRE(sub != nullptr);
 
@@ -376,9 +376,9 @@ TEST_CASE("multiple publishers, one subscriber")
 {
     Fixture f(TEST_DIR);
 
-    bacaro_t *p1  = bacaro_new("proc1");
-    bacaro_t *p2  = bacaro_new("proc2");
-    bacaro_t *sub = bacaro_new("monitor");
+    bacaro_t *p1  = bacaro_new("proc1", nullptr);
+    bacaro_t *p2  = bacaro_new("proc2", nullptr);
+    bacaro_t *sub = bacaro_new("monitor", nullptr);
     REQUIRE(p1 != nullptr);
     REQUIRE(p2 != nullptr);
     REQUIRE(sub != nullptr);
@@ -411,8 +411,8 @@ TEST_CASE("property published by dead process stays in cache")
 {
     Fixture f(TEST_DIR);
 
-    bacaro_t *pub = bacaro_new("publisher");
-    bacaro_t *sub = bacaro_new("subscriber");
+    bacaro_t *pub = bacaro_new("publisher", nullptr);
+    bacaro_t *sub = bacaro_new("subscriber", nullptr);
     REQUIRE(pub != nullptr);
     REQUIRE(sub != nullptr);
 

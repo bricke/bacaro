@@ -5,13 +5,24 @@ The full public API is declared in [`include/bacaro.h`](../include/bacaro.h).
 ## Lifecycle
 
 ```c
-bacaro_t *bacaro_new    (const char *name);
+bacaro_t *bacaro_new    (const char *name, const char **published_domains);
 void      bacaro_destroy(bacaro_t **self);
 ```
 
 `bacaro_new` creates a new instance with the given process name, binds its sockets, and starts peer discovery. Returns `NULL` on failure.
 
-`bacaro_destroy` disconnects all peers, removes IPC files, and frees all resources. Sets `*self` to `NULL`.
+`published_domains` is an optional NULL-terminated array of domain strings that this process will publish. When provided, a `.manifest` file is written alongside the `.pub` and `.rep` files so that peers can skip snapshot requests for non-overlapping domains. Pass `NULL` if you don't want to declare a manifest — the bus works identically without one.
+
+```c
+// Declare published domains (optional optimisation)
+const char *domains[] = {"sensors", "power", NULL};
+bacaro_t *b = bacaro_new("powerd", domains);
+
+// No manifest — backwards compatible
+bacaro_t *b = bacaro_new("monitor", NULL);
+```
+
+`bacaro_destroy` disconnects all peers, removes IPC files (including the `.manifest` if one was written), and frees all resources. Sets `*self` to `NULL`.
 
 ## Subscriptions
 
@@ -108,7 +119,8 @@ typedef void (*bacaro_fn)(bacaro_t *self, const char *path,
 #include <msgpack.hpp>
 
 // Publisher
-bacaro_t *pub = bacaro_new("powerd");
+const char *domains[] = {"system", "power", nullptr};
+bacaro_t *pub = bacaro_new("powerd", domains);
 
 msgpack::sbuffer buf;
 msgpack::pack(buf, 87.3);
@@ -124,7 +136,7 @@ static void on_update(bacaro_t *self, const char *path,
     // called on every received update
 }
 
-bacaro_t *sub = bacaro_new("monitor");
+bacaro_t *sub = bacaro_new("monitor", nullptr);
 bacaro_subscribe(sub, "system");
 bacaro_on_update(sub, on_update, NULL);
 

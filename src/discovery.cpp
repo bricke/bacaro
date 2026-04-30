@@ -5,6 +5,7 @@
 #include <sys/inotify.h>
 #include <unistd.h>
 #include <filesystem>
+#include <fstream>
 #include <cstring>
 
 namespace fs = std::filesystem;
@@ -73,6 +74,27 @@ void discovery_epoll_remove_zmq(bacaro_t *self, void *sock)
     epoll_modify(self->epoll_fd, get_zmq_fd(sock), EPOLL_CTL_DEL);
 }
 
+static void read_manifest(const bacaro_t *self, const std::string &pub_filename,
+                          std::vector<std::string> &out, bool &found)
+{
+    // Replace .pub suffix with .manifest
+    std::string manifest_file = self->runtime_dir + "/"
+        + pub_filename.substr(0, pub_filename.size() - 4) + ".manifest";
+
+    std::ifstream in(manifest_file);
+    if (!in.is_open()) {
+        found = false;
+        return;
+    }
+
+    found = true;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty())
+            out.push_back(std::move(line));
+    }
+}
+
 static std::string ipc_endpoint(const bacaro_t *self, const std::string &filename)
 {
     return "ipc://" + self->runtime_dir + "/" + filename;
@@ -103,18 +125,32 @@ int discovery_peer_connect(bacaro_t *self, const std::string &filename)
         return BACARO_EZMQ;
 
     std::string rep_ep = ipc_endpoint(self, rep_filename);
-    self->peers[filename] = { nullptr, peer_name, pub_ep, rep_ep, -1 };
 
-    // ── Lazy DEALER: only create if we have active subscriptions ─────────
+    PeerInfo peer_info;
+    peer_info.name         = peer_name;
+    peer_info.pub_endpoint = pub_ep;
+    peer_info.rep_endpoint = rep_ep;
+
+    // Read manifest if available
+    read_manifest(self, filename, peer_info.manifest, peer_info.has_manifest);
+
+    self->peers[filename] = std::move(peer_info);
+
+    // ── Lazy DEALER: only create if subscriptions overlap with manifest ─
     if (!self->subscriptions.empty()) {
-        if (discovery_ensure_dealer(self, filename, self->peers[filename]) != BACARO_OK) {
-            zmq_disconnect(self->sub_sock, pub_ep.c_str());
-            self->peers.erase(filename);
-            return BACARO_EZMQ;
+        auto &peer = self->peers[filename];
+        for (const auto &prefix : self->subscriptions) {
+            if (!manifest_overlaps(peer, prefix))
+                continue;
+            if (!peer.dealer_sock) {
+                if (discovery_ensure_dealer(self, filename, peer) != BACARO_OK) {
+                    zmq_disconnect(self->sub_sock, pub_ep.c_str());
+                    self->peers.erase(filename);
+                    return BACARO_EZMQ;
+                }
+            }
+            snapshot_send_request(peer.dealer_sock, prefix);
         }
-
-        for (const auto &prefix : self->subscriptions)
-            snapshot_send_request(self->peers[filename].dealer_sock, prefix);
     }
 
     return BACARO_OK;

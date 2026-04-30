@@ -22,8 +22,9 @@ There is no central broker. Each process:
 
 1. Binds a `ZMQ_PUB` socket and a `ZMQ_ROUTER` socket, creating IPC files in the runtime directory.
 2. Watches the runtime directory with **inotify** for new peers.
-3. Connects a `ZMQ_SUB` socket and a `ZMQ_DEALER` socket to each peer on discovery.
-4. Requests a **snapshot** of current state from each peer on connect, seeding its local cache.
+3. Connects a single shared `ZMQ_SUB` socket to each peer's PUB endpoint on discovery.
+4. Creates a per-peer `ZMQ_DEALER` socket lazily — only when a subscription overlaps with the peer's manifest (or when the peer has no manifest).
+5. Requests a **snapshot** of current state from each relevant peer on connect, seeding its local cache.
 
 After the initial snapshot, live `PUB/SUB` updates keep every subscriber's cache current.
 
@@ -33,7 +34,7 @@ Any process can publish on any path at any time. There is no ownership enforceme
 
 ## Publisher identity
 
-No identity frame is added to the wire format. The publisher's name is inferred from which IPC socket the message arrived on — zero overhead.
+The publisher's name is carried explicitly as a frame in the wire format. This is necessary because all messages from all peers arrive on a single shared SUB socket — there is no per-peer socket to infer identity from.
 
 ## Late join / snapshot protocol
 
@@ -43,14 +44,30 @@ Bacaro solves this automatically: every time a new peer is discovered or a new s
 
 This means `bacaro_get` always returns the latest known value immediately, without any blocking network call.
 
+## Manifest
+
+An optional optimisation for deployments where the set of processes and their published domains is known at build time.
+
+When calling `bacaro_new`, pass a NULL-terminated array of domain strings that the process will publish:
+
+```c
+const char *domains[] = {"sensors", "power", NULL};
+bacaro_t *b = bacaro_new("powerd", domains);
+```
+
+Bacaro writes this list to a `.manifest` file alongside the `.pub` file. When peers discover the process, they read the manifest and only open a DEALER socket (and request a snapshot) if their subscriptions overlap with the declared domains. Peers with no overlapping subscriptions skip the handshake entirely, reducing boot-time connection overhead.
+
+Passing `NULL` disables the manifest — the bus works identically without one. The manifest is an optimisation hint, not access control: a process can still publish on any path regardless of what it declared.
+
 ## Wire format
 
-Every published message is a three-frame ZMQ multipart message:
+Every published message is a four-frame ZMQ multipart message:
 
 ```
-Frame 0 — topic   : "domain.sub.property"    (ZMQ SUB prefix filter)
-Frame 1 — header  : version(1) | flags(1) | sequence(8) | timestamp(8)
-Frame 2 — payload : MessagePack bytes
+Frame 0 — topic     : "domain.sub.property"    (ZMQ SUB prefix filter)
+Frame 1 — publisher : publisher process name
+Frame 2 — header    : version(1) | flags(1) | sequence(8) | timestamp(8)
+Frame 3 — payload   : MessagePack bytes
 ```
 
 Snapshot request/reply uses the same framing over the `DEALER/ROUTER` pair, with a flag byte indicating request, reply, or end-of-snapshot.

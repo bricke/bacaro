@@ -42,7 +42,7 @@ Optional build flags (CMake option or env variable):
 
 ```c
 // Lifecycle
-bacaro_t *bacaro_new(const char *name);
+bacaro_t *bacaro_new(const char *name, const char **published_domains);
 void      bacaro_destroy(bacaro_t **self);
 
 // Subscriptions

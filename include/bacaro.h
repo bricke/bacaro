@@ -25,8 +25,12 @@ typedef void (*bacaro_fn)(bacaro_t *self,
                          const uint8_t *data, size_t len,
                          void *userdata);
 
-/* Lifecycle */
-bacaro_t *bacaro_new    (const char *name);
+/* Lifecycle.
+   published_domains is an optional NULL-terminated array of domain prefixes
+   this process will publish. If provided, a manifest file is written so peers
+   can skip snapshot requests for non-overlapping domains. Pass NULL to opt out
+   (all peers will snapshot as usual). */
+bacaro_t *bacaro_new    (const char *name, const char **published_domains);
 void     bacaro_destroy(bacaro_t **self);
 
 /* Subscriptions */
